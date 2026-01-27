@@ -5,8 +5,6 @@ defmodule ExOutlines do
   Main entry point for generating constrained outputs using retry-repair loops.
   """
 
-  require Logger
-
   @type generate_opts :: [
           backend: module(),
           backend_opts: keyword(),
@@ -30,8 +28,10 @@ defmodule ExOutlines do
 
   - `{:ok, result}` - Successfully generated and validated output
   - `{:error, :max_retries_exceeded}` - Exhausted all retry attempts
-  - `{:error, :backend_error}` - Backend communication failure
+  - `{:error, {:backend_error, reason}}` - Backend communication failure
+  - `{:error, {:backend_exception, error}}` - Backend raised an exception
   - `{:error, :no_backend}` - No backend specified
+  - `{:error, {:invalid_backend, value}}` - Backend is not an atom
   """
   @spec generate(ExOutlines.Spec.t(), generate_opts()) :: generate_result()
   def generate(spec, opts \\ []) do
