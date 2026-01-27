@@ -64,22 +64,24 @@ defmodule ExOutlines.IntegrationTest do
       assert length(diag.errors) == 3
 
       # Invalid: negative age
-      assert {:error, diag} = Spec.validate(schema, %{
-               "username" => "dave",
-               "email" => "dave@example.com",
-               "age" => -5
-             })
+      assert {:error, diag} =
+               Spec.validate(schema, %{
+                 "username" => "dave",
+                 "email" => "dave@example.com",
+                 "age" => -5
+               })
 
       assert hd(diag.errors).field == "age"
       assert hd(diag.errors).expected =~ "positive"
 
       # Invalid: wrong enum value
-      assert {:error, diag} = Spec.validate(schema, %{
-               "username" => "eve",
-               "email" => "eve@example.com",
-               "age" => 28,
-               "role" => "superadmin"
-             })
+      assert {:error, diag} =
+               Spec.validate(schema, %{
+                 "username" => "eve",
+                 "email" => "eve@example.com",
+                 "age" => 28,
+                 "role" => "superadmin"
+               })
 
       assert Enum.any?(diag.errors, &(&1.field == "role"))
     end
