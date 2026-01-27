@@ -21,3 +21,16 @@ ex_outlines-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Dialyzer PLT files
+/priv/plts/
+*.plt
+*.plt.hash
+
+# Coverage reports
+/cover/
+/coverage/
+coveralls.json
+
+# Documentation output
+docs_output.txt

@@ -76,9 +76,7 @@ defmodule ExOutlines.Prompt do
   end
 
   defp format_errors(errors) when is_list(errors) do
-    errors
-    |> Enum.map(&format_error/1)
-    |> Enum.join("\n")
+    Enum.map_join(errors, "\n", &format_error/1)
   end
 
   defp format_error(%{field: nil, message: message}) do
