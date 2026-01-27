@@ -10,6 +10,7 @@ defmodule ExOutlines.MixProject do
       version: @version,
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
+      consolidate_protocols: Mix.env() != :test,
       deps: deps(),
       package: package(),
       description: description(),
