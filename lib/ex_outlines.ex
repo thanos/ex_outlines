@@ -5,8 +5,6 @@ defmodule ExOutlines do
   Main entry point for generating constrained outputs using retry-repair loops.
   """
 
-  require Logger
-
   @type generate_opts :: [
           backend: module(),
           backend_opts: keyword(),
