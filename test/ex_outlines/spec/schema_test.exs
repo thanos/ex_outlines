@@ -560,4 +560,351 @@ defmodule ExOutlines.Spec.SchemaTest do
       refute Map.has_key?(validated, :bio)
     end
   end
+
+  describe "string length constraints" do
+    test "validates minimum length" do
+      schema = Schema.new(%{username: %{type: :string, required: true, min_length: 3}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"username" => "abc"})
+      assert result.username == "abc"
+
+      assert {:ok, result} = Spec.validate(schema, %{"username" => "alice"})
+      assert result.username == "alice"
+    end
+
+    test "rejects string shorter than minimum length" do
+      schema = Schema.new(%{username: %{type: :string, required: true, min_length: 3}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"username" => "ab"})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "username"
+      assert error.message =~ "at least 3 characters"
+    end
+
+    test "validates maximum length" do
+      schema = Schema.new(%{bio: %{type: :string, max_length: 10}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"bio" => "hello"})
+      assert result.bio == "hello"
+
+      assert {:ok, result} = Spec.validate(schema, %{"bio" => "1234567890"})
+      assert result.bio == "1234567890"
+    end
+
+    test "rejects string longer than maximum length" do
+      schema = Schema.new(%{bio: %{type: :string, max_length: 10}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"bio" => "12345678901"})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "bio"
+      assert error.message =~ "at most 10 characters"
+    end
+
+    test "validates length range (min and max)" do
+      schema =
+        Schema.new(%{username: %{type: :string, required: true, min_length: 3, max_length: 20}})
+
+      # Valid cases
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "abc"})
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "alice123"})
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "12345678901234567890"})
+
+      # Too short
+      assert {:error, diag} = Spec.validate(schema, %{"username" => "ab"})
+      assert hd(diag.errors).message =~ "at least 3 characters"
+
+      # Too long
+      assert {:error, diag} = Spec.validate(schema, %{"username" => "123456789012345678901"})
+      assert hd(diag.errors).message =~ "at most 20 characters"
+    end
+
+    test "handles empty string with minimum length" do
+      schema = Schema.new(%{name: %{type: :string, min_length: 1}})
+
+      assert {:error, diag} = Spec.validate(schema, %{"name" => ""})
+      assert hd(diag.errors).message =~ "at least 1"
+    end
+
+    test "handles empty string with maximum length (valid)" do
+      schema = Schema.new(%{name: %{type: :string, max_length: 10}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"name" => ""})
+      assert result.name == ""
+    end
+
+    test "counts unicode characters correctly" do
+      schema = Schema.new(%{emoji: %{type: :string, min_length: 1, max_length: 5}})
+
+      # Single emoji (1 character, not 4 bytes)
+      assert {:ok, result} = Spec.validate(schema, %{"emoji" => "🎉"})
+      assert result.emoji == "🎉"
+
+      # Multiple emojis
+      assert {:ok, result} = Spec.validate(schema, %{"emoji" => "🎉🚀✨"})
+      assert result.emoji == "🎉🚀✨"
+
+      # Too many emojis
+      assert {:error, diag} = Spec.validate(schema, %{"emoji" => "🎉🚀✨💡🔥⭐"})
+      assert hd(diag.errors).message =~ "at most 5 characters"
+    end
+
+    test "length constraint with optional field (not provided)" do
+      schema = Schema.new(%{bio: %{type: :string, required: false, max_length: 100}})
+
+      # Not provided is OK
+      assert {:ok, result} = Spec.validate(schema, %{})
+      refute Map.has_key?(result, :bio)
+    end
+
+    test "JSON Schema includes minLength and maxLength" do
+      schema =
+        Schema.new(%{
+          username: %{type: :string, min_length: 3, max_length: 20},
+          bio: %{type: :string, max_length: 500}
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      username_schema = json_schema.properties.username
+      assert username_schema[:minLength] == 3
+      assert username_schema[:maxLength] == 20
+
+      bio_schema = json_schema.properties.bio
+      refute Map.has_key?(bio_schema, :minLength)
+      assert bio_schema[:maxLength] == 500
+    end
+  end
+
+  describe "integer min/max constraints" do
+    test "validates minimum value" do
+      schema = Schema.new(%{age: %{type: :integer, required: true, min: 0}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"age" => 0})
+      assert result.age == 0
+
+      assert {:ok, result} = Spec.validate(schema, %{"age" => 50})
+      assert result.age == 50
+
+      assert {:ok, result} = Spec.validate(schema, %{"age" => 120})
+      assert result.age == 120
+    end
+
+    test "rejects integer below minimum" do
+      schema = Schema.new(%{age: %{type: :integer, min: 0}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"age" => -1})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "age"
+      assert error.message =~ "at least 0"
+    end
+
+    test "validates maximum value" do
+      schema = Schema.new(%{quantity: %{type: :integer, max: 999}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => 1})
+      assert result.quantity == 1
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => 999})
+      assert result.quantity == 999
+    end
+
+    test "rejects integer above maximum" do
+      schema = Schema.new(%{quantity: %{type: :integer, max: 999}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"quantity" => 1000})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "quantity"
+      assert error.message =~ "at most 999"
+    end
+
+    test "validates range (min and max)" do
+      schema = Schema.new(%{score: %{type: :integer, required: true, min: 0, max: 100}})
+
+      # Valid cases
+      assert {:ok, _} = Spec.validate(schema, %{"score" => 0})
+      assert {:ok, _} = Spec.validate(schema, %{"score" => 50})
+      assert {:ok, _} = Spec.validate(schema, %{"score" => 100})
+
+      # Below minimum
+      assert {:error, diag} = Spec.validate(schema, %{"score" => -1})
+      assert hd(diag.errors).message =~ "at least 0"
+
+      # Above maximum
+      assert {:error, diag} = Spec.validate(schema, %{"score" => 101})
+      assert hd(diag.errors).message =~ "at most 100"
+    end
+
+    test "backward compatibility with positive: true" do
+      schema = Schema.new(%{count: %{type: :integer, required: true, positive: true}})
+
+      # Still works like before
+      assert {:ok, result} = Spec.validate(schema, %{"count" => 1})
+      assert result.count == 1
+
+      assert {:ok, result} = Spec.validate(schema, %{"count" => 100})
+      assert result.count == 100
+
+      # Rejects 0 and negative - uses old error message format
+      assert {:error, diag} = Spec.validate(schema, %{"count" => 0})
+      assert hd(diag.errors).message =~ "positive integer"
+
+      assert {:error, diag} = Spec.validate(schema, %{"count" => -5})
+      assert hd(diag.errors).message =~ "positive integer"
+    end
+
+    test "min value takes precedence over positive: true" do
+      schema = Schema.new(%{count: %{type: :integer, positive: true, min: 5}})
+
+      # min: 5 is used, not min: 1 from positive
+      assert {:ok, _} = Spec.validate(schema, %{"count" => 5})
+      assert {:error, diag} = Spec.validate(schema, %{"count" => 1})
+      assert hd(diag.errors).message =~ "at least 5"
+    end
+
+    test "handles negative numbers with negative minimum" do
+      schema = Schema.new(%{temperature: %{type: :integer, min: -100, max: 100}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"temperature" => -100})
+      assert result.temperature == -100
+
+      assert {:ok, result} = Spec.validate(schema, %{"temperature" => -50})
+      assert result.temperature == -50
+
+      assert {:error, diag} = Spec.validate(schema, %{"temperature" => -101})
+      assert hd(diag.errors).message =~ "at least -100"
+    end
+
+    test "value equals min is valid" do
+      schema = Schema.new(%{value: %{type: :integer, min: 10}})
+      assert {:ok, result} = Spec.validate(schema, %{"value" => 10})
+      assert result.value == 10
+    end
+
+    test "value equals max is valid" do
+      schema = Schema.new(%{value: %{type: :integer, max: 10}})
+      assert {:ok, result} = Spec.validate(schema, %{"value" => 10})
+      assert result.value == 10
+    end
+
+    test "JSON Schema includes minimum and maximum" do
+      schema =
+        Schema.new(%{
+          age: %{type: :integer, min: 0, max: 120},
+          count: %{type: :integer, positive: true},
+          score: %{type: :integer, max: 100}
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      age_schema = json_schema.properties.age
+      assert age_schema[:minimum] == 0
+      assert age_schema[:maximum] == 120
+
+      # positive: true generates minimum: 1
+      count_schema = json_schema.properties.count
+      assert count_schema[:minimum] == 1
+      refute Map.has_key?(count_schema, :maximum)
+
+      score_schema = json_schema.properties.score
+      refute Map.has_key?(score_schema, :minimum)
+      assert score_schema[:maximum] == 100
+    end
+  end
+
+  describe "number (float) min/max constraints" do
+    test "validates minimum value for floats" do
+      schema = Schema.new(%{temperature: %{type: :number, min: -273.15}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"temperature" => -273.15})
+      assert result.temperature == -273.15
+
+      assert {:ok, result} = Spec.validate(schema, %{"temperature" => 0.0})
+      assert result.temperature == 0.0
+
+      assert {:ok, result} = Spec.validate(schema, %{"temperature" => 100.5})
+      assert result.temperature == 100.5
+    end
+
+    test "rejects number below minimum" do
+      schema = Schema.new(%{temperature: %{type: :number, min: -273.15}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"temperature" => -300.0})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "temperature"
+      assert error.message =~ "at least -273.15"
+    end
+
+    test "validates maximum value for floats" do
+      schema = Schema.new(%{percentage: %{type: :number, max: 100.0}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"percentage" => 0.0})
+      assert result.percentage == 0.0
+
+      assert {:ok, result} = Spec.validate(schema, %{"percentage" => 99.99})
+      assert result.percentage == 99.99
+
+      assert {:ok, result} = Spec.validate(schema, %{"percentage" => 100.0})
+      assert result.percentage == 100.0
+    end
+
+    test "rejects number above maximum" do
+      schema = Schema.new(%{percentage: %{type: :number, max: 100.0}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"percentage" => 100.1})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "percentage"
+      assert error.message =~ "at most 100.0"
+    end
+
+    test "validates range for floats" do
+      schema = Schema.new(%{probability: %{type: :number, min: 0.0, max: 1.0}})
+
+      # Valid cases
+      assert {:ok, _} = Spec.validate(schema, %{"probability" => 0.0})
+      assert {:ok, _} = Spec.validate(schema, %{"probability" => 0.5})
+      assert {:ok, _} = Spec.validate(schema, %{"probability" => 1.0})
+
+      # Out of range
+      assert {:error, diag} = Spec.validate(schema, %{"probability" => -0.1})
+      assert hd(diag.errors).message =~ "at least 0.0"
+
+      assert {:error, diag} = Spec.validate(schema, %{"probability" => 1.1})
+      assert hd(diag.errors).message =~ "at most 1.0"
+    end
+
+    test "accepts integers for number type with constraints" do
+      schema = Schema.new(%{value: %{type: :number, min: 0, max: 100}})
+
+      # Integers are valid for :number type
+      assert {:ok, result} = Spec.validate(schema, %{"value" => 0})
+      assert result.value == 0
+
+      assert {:ok, result} = Spec.validate(schema, %{"value" => 50})
+      assert result.value == 50
+    end
+
+    test "JSON Schema includes minimum and maximum for numbers" do
+      schema =
+        Schema.new(%{
+          temperature: %{type: :number, min: -273.15, max: 1000.0},
+          ratio: %{type: :number, min: 0.0}
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      temp_schema = json_schema.properties.temperature
+      assert temp_schema[:minimum] == -273.15
+      assert temp_schema[:maximum] == 1000.0
+
+      ratio_schema = json_schema.properties.ratio
+      assert ratio_schema[:minimum] == 0.0
+      refute Map.has_key?(ratio_schema, :maximum)
+    end
+  end
 end
