@@ -11,6 +11,8 @@ defmodule ExOutlines.Spec.Schema do
   - `:boolean` - Boolean values (true/false)
   - `:number` - Numeric values (integer or float)
   - `{:enum, values}` - Enumerated values from a list
+  - `{:array, item_spec}` - Array/list of items with validation
+  - `{:object, Schema.t()}` - Nested object with recursive validation
 
   ## Field Specification
 
@@ -29,19 +31,32 @@ defmodule ExOutlines.Spec.Schema do
 
   ## Example
 
+      address_schema = %ExOutlines.Spec.Schema{
+        fields: %{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true, min_length: 5}
+        }
+      }
+
       schema = %ExOutlines.Spec.Schema{
         fields: %{
           name: %{type: :string, required: true, description: "User's full name"},
           age: %{type: :integer, required: true, positive: true},
           role: %{type: {:enum, ["admin", "user"]}, required: false},
           active: %{type: :boolean, required: false},
-          tags: %{type: {:array, %{type: :string, max_length: 20}}, max_items: 10}
+          tags: %{type: {:array, %{type: :string, max_length: 20}}, max_items: 10},
+          address: %{type: {:object, address_schema}, required: true}
         }
       }
 
-      # Valid input
-      ExOutlines.Spec.validate(schema, %{"name" => "Alice", "age" => 30, "tags" => ["elixir"]})
-      # => {:ok, %{name: "Alice", age: 30, tags: ["elixir"]}}
+      # Valid input with nested object
+      ExOutlines.Spec.validate(schema, %{
+        "name" => "Alice",
+        "age" => 30,
+        "tags" => ["elixir"],
+        "address" => %{"city" => "NYC", "zip_code" => "10001"}
+      })
+      # => {:ok, %{name: "Alice", age: 30, tags: ["elixir"], address: %{city: "NYC", zip_code: "10001"}}}
 
       # Invalid input (missing required field)
       ExOutlines.Spec.validate(schema, %{"name" => "Bob"})
@@ -50,7 +65,22 @@ defmodule ExOutlines.Spec.Schema do
 
   alias ExOutlines.Diagnostics
 
-  @type field_type :: :string | :integer | :boolean | :number | {:enum, [any()]}
+  @type item_spec :: %{
+          type: :string | :integer | :boolean | :number | {:enum, [any()]},
+          min_length: non_neg_integer() | nil,
+          max_length: pos_integer() | nil,
+          min: number() | nil,
+          max: number() | nil
+        }
+
+  @type field_type ::
+          :string
+          | :integer
+          | :boolean
+          | :number
+          | {:enum, [any()]}
+          | {:array, item_spec()}
+          | {:object, t()}
 
   @type field_spec :: %{
           type: field_type(),
@@ -310,6 +340,26 @@ defmodule ExOutlines.Spec.Schema do
       add_description(base, spec)
     end
 
+    defp field_to_json_schema(%{type: {:object, nested_schema}} = spec) do
+      # Recursively generate JSON Schema for nested object
+      nested_json_schema = ExOutlines.Spec.to_schema(nested_schema)
+
+      base = %{
+        type: "object",
+        properties: nested_json_schema.properties
+      }
+
+      # Add required fields if present
+      base =
+        if Map.has_key?(nested_json_schema, :required) do
+          Map.put(base, :required, nested_json_schema.required)
+        else
+          base
+        end
+
+      add_description(base, spec)
+    end
+
     defp item_spec_to_json_schema(%{type: :string} = spec) do
       base = %{type: "string"}
 
@@ -387,8 +437,11 @@ defmodule ExOutlines.Spec.Schema do
     defp normalize_keys(map) when is_map(map) do
       map
       |> Enum.map(fn
-        {key, value} when is_binary(key) -> {String.to_existing_atom(key), value}
-        {key, value} when is_atom(key) -> {key, value}
+        {key, value} when is_binary(key) ->
+          {String.to_existing_atom(key), normalize_value(value)}
+
+        {key, value} when is_atom(key) ->
+          {key, normalize_value(value)}
       end)
       |> Enum.into(%{})
     rescue
@@ -396,6 +449,10 @@ defmodule ExOutlines.Spec.Schema do
         # If string key doesn't exist as atom, keep as is
         map
     end
+
+    # Recursively normalize nested maps
+    defp normalize_value(value) when is_map(value), do: normalize_keys(value)
+    defp normalize_value(value), do: value
 
     defp validate_all_fields(fields, value) do
       fields
@@ -543,6 +600,34 @@ defmodule ExOutlines.Spec.Schema do
           expected: "array",
           got: value,
           message: "Field '#{name}' must be an array"
+        }
+      ]
+    end
+
+    defp validate_field_type(name, %{type: {:object, nested_schema}}, value)
+         when is_map(value) do
+      # Recursively validate nested object
+      case ExOutlines.Spec.validate(nested_schema, value) do
+        {:ok, _validated} ->
+          # Nested object is valid
+          []
+
+        {:error, diagnostics} ->
+          # Nested object has errors - prefix field names with parent path
+          diagnostics.errors
+          |> Enum.map(fn error ->
+            prefix_field_path(error, name)
+          end)
+      end
+    end
+
+    defp validate_field_type(name, %{type: {:object, _}}, value) do
+      [
+        %{
+          field: to_string(name),
+          expected: "object",
+          got: value,
+          message: "Field '#{name}' must be an object"
         }
       ]
     end
@@ -871,6 +956,17 @@ defmodule ExOutlines.Spec.Schema do
           }
         ]
       end
+    end
+
+    # Prefix error field path with parent field name for nested objects
+    defp prefix_field_path(%{field: nil} = error, _parent), do: error
+
+    defp prefix_field_path(%{field: field, message: message} = error, parent) do
+      new_field = "#{parent}.#{field}"
+      # Update both field and message to use the full path
+      new_message = String.replace(message, "'#{field}'", "'#{new_field}'")
+
+      %{error | field: new_field, message: new_message}
     end
   end
 end

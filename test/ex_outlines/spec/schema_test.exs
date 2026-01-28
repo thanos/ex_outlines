@@ -1180,4 +1180,329 @@ defmodule ExOutlines.Spec.SchemaTest do
       refute Map.has_key?(result, :tags)
     end
   end
+
+  describe "nested object validation" do
+    test "validates nested object (1 level)" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{"city" => "NYC", "zip_code" => "10001"}
+      }
+
+      assert {:ok, result} = Spec.validate(user_schema, input)
+      assert result.name == "Alice"
+      assert result.address.city == "NYC"
+      assert result.address.zip_code == "10001"
+    end
+
+    test "validates deeply nested objects (3 levels)" do
+      location_schema =
+        Schema.new(%{
+          lat: %{type: :number, required: true},
+          lng: %{type: :number, required: true}
+        })
+
+      address_schema =
+        Schema.new(%{
+          street: %{type: :string, required: true},
+          location: %{type: {:object, location_schema}, required: true}
+        })
+
+      company_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Acme Corp",
+        "address" => %{
+          "street" => "123 Main St",
+          "location" => %{"lat" => 40.7128, "lng" => -74.0060}
+        }
+      }
+
+      assert {:ok, result} = Spec.validate(company_schema, input)
+      assert result.name == "Acme Corp"
+      assert result.address.street == "123 Main St"
+      assert result.address.location.lat == 40.7128
+      assert result.address.location.lng == -74.0060
+    end
+
+    test "error messages include full path" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true, min_length: 5}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{"zip_code" => "123"}
+      }
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(user_schema, input)
+      errors = diag.errors
+
+      # Should have error for missing city
+      assert Enum.any?(errors, fn e -> e.field == "address.city" end)
+      missing_city = Enum.find(errors, fn e -> e.field == "address.city" end)
+      assert missing_city.message =~ "address.city"
+
+      # Should have error for zip_code too short
+      assert Enum.any?(errors, fn e -> e.field == "address.zip_code" end)
+      short_zip = Enum.find(errors, fn e -> e.field == "address.zip_code" end)
+      assert short_zip.message =~ "address.zip_code"
+      assert short_zip.message =~ "at least 5"
+    end
+
+    test "handles multiple errors in nested object" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{}
+      }
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(user_schema, input)
+      assert length(diag.errors) == 2
+
+      fields = Enum.map(diag.errors, & &1.field)
+      assert "address.city" in fields
+      assert "address.zip_code" in fields
+    end
+
+    test "rejects non-map value for nested object" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(user_schema, %{"address" => "not-a-map"})
+
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "address"
+      assert error.message =~ "must be an object"
+    end
+
+    test "nested object with array field" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          phone_numbers: %{type: {:array, %{type: :string}}, min_items: 1}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{
+          "city" => "NYC",
+          "phone_numbers" => ["555-0100", "555-0200"]
+        }
+      }
+
+      assert {:ok, result} = Spec.validate(user_schema, input)
+      assert result.address.phone_numbers == ["555-0100", "555-0200"]
+    end
+
+    test "nested object with constrained strings" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true, min_length: 2, max_length: 50},
+          state: %{type: :string, required: true, min_length: 2, max_length: 2}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      # Valid
+      assert {:ok, _} =
+               Spec.validate(user_schema, %{
+                 "address" => %{"city" => "NYC", "state" => "NY"}
+               })
+
+      # Invalid - state too long
+      assert {:error, diag} =
+               Spec.validate(user_schema, %{
+                 "address" => %{"city" => "NYC", "state" => "NYY"}
+               })
+
+      error = hd(diag.errors)
+      assert error.field == "address.state"
+      assert error.message =~ "address.state"
+      assert error.message =~ "at most 2"
+    end
+
+    test "optional nested object (when not provided)" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: false}
+        })
+
+      assert {:ok, result} = Spec.validate(user_schema, %{"name" => "Alice"})
+      assert result.name == "Alice"
+      refute Map.has_key?(result, :address)
+    end
+
+    test "empty nested object validates against schema" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: false}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      assert {:ok, result} = Spec.validate(user_schema, %{"address" => %{}})
+      assert result.address == %{}
+    end
+
+    test "JSON Schema generation for nested objects" do
+      address_schema =
+        Schema.new(%{
+          street: %{type: :string, required: true},
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: false}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      json_schema = Spec.to_schema(user_schema)
+
+      assert json_schema.type == "object"
+      assert json_schema.required == ["address", "name"]
+
+      address_json = json_schema.properties.address
+      assert address_json[:type] == "object"
+      assert address_json[:properties][:street][:type] == "string"
+      assert address_json[:properties][:city][:type] == "string"
+      assert address_json[:properties][:zip_code][:type] == "string"
+      assert Enum.sort(address_json[:required]) == ["city", "street"]
+    end
+
+    test "deeply nested JSON Schema generation" do
+      location_schema =
+        Schema.new(%{
+          lat: %{type: :number, required: true},
+          lng: %{type: :number, required: true}
+        })
+
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          location: %{type: {:object, location_schema}, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      json_schema = Spec.to_schema(user_schema)
+
+      address_json = json_schema.properties.address
+      assert address_json[:type] == "object"
+
+      location_json = address_json[:properties][:location]
+      assert location_json[:type] == "object"
+      assert location_json[:properties][:lat][:type] == "number"
+      assert location_json[:properties][:lng][:type] == "number"
+      assert Enum.sort(location_json[:required]) == ["lat", "lng"]
+    end
+
+    test "nested object with integer constraints" do
+      contact_schema =
+        Schema.new(%{
+          age: %{type: :integer, required: true, min: 0, max: 120}
+        })
+
+      user_schema =
+        Schema.new(%{
+          contact: %{type: {:object, contact_schema}, required: true}
+        })
+
+      # Valid
+      assert {:ok, _} = Spec.validate(user_schema, %{"contact" => %{"age" => 30}})
+
+      # Invalid - age too high
+      assert {:error, diag} = Spec.validate(user_schema, %{"contact" => %{"age" => 150}})
+      error = hd(diag.errors)
+      assert error.field == "contact.age"
+      assert error.message =~ "contact.age"
+    end
+
+    test "nested object with enum field" do
+      profile_schema =
+        Schema.new(%{
+          role: %{type: {:enum, ["admin", "user", "guest"]}, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          profile: %{type: {:object, profile_schema}, required: true}
+        })
+
+      # Valid
+      assert {:ok, result} = Spec.validate(user_schema, %{"profile" => %{"role" => "admin"}})
+      assert result.profile.role == "admin"
+
+      # Invalid
+      assert {:error, diag} = Spec.validate(user_schema, %{"profile" => %{"role" => "invalid"}})
+      error = hd(diag.errors)
+      assert error.field == "profile.role"
+    end
+  end
 end
