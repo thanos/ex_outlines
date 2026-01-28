@@ -19,6 +19,10 @@ defmodule ExOutlines.Spec.Schema do
   - `required` - Whether the field must be present (default: false)
   - `description` - Documentation for the field (optional)
   - `positive` - For integers, must be > 0 (optional, default: false)
+  - `min_length` - For strings, minimum length in characters (optional)
+  - `max_length` - For strings, maximum length in characters (optional)
+  - `min` - For integers/numbers, minimum value (optional)
+  - `max` - For integers/numbers, maximum value (optional)
 
   ## Example
 
@@ -48,7 +52,11 @@ defmodule ExOutlines.Spec.Schema do
           type: field_type(),
           required: boolean(),
           description: String.t() | nil,
-          positive: boolean()
+          positive: boolean(),
+          min_length: non_neg_integer() | nil,
+          max_length: pos_integer() | nil,
+          min: number() | nil,
+          max: number() | nil
         }
 
   @type t :: %__MODULE__{
@@ -95,7 +103,11 @@ defmodule ExOutlines.Spec.Schema do
       type: type,
       required: Keyword.get(opts, :required, false),
       description: Keyword.get(opts, :description),
-      positive: Keyword.get(opts, :positive, false)
+      positive: Keyword.get(opts, :positive, false),
+      min_length: Keyword.get(opts, :min_length),
+      max_length: Keyword.get(opts, :max_length),
+      min: Keyword.get(opts, :min),
+      max: Keyword.get(opts, :max)
     }
 
     %{schema | fields: Map.put(fields, name, field_spec)}
@@ -128,7 +140,11 @@ defmodule ExOutlines.Spec.Schema do
       type: Map.fetch!(spec, :type),
       required: Map.get(spec, :required, false),
       description: Map.get(spec, :description),
-      positive: Map.get(spec, :positive, false)
+      positive: Map.get(spec, :positive, false),
+      min_length: Map.get(spec, :min_length),
+      max_length: Map.get(spec, :max_length),
+      min: Map.get(spec, :min),
+      max: Map.get(spec, :max)
     }
   end
 
@@ -190,16 +206,44 @@ defmodule ExOutlines.Spec.Schema do
 
     defp field_to_json_schema(%{type: :string} = spec) do
       base = %{type: "string"}
-      add_description(base, spec)
-    end
 
-    defp field_to_json_schema(%{type: :integer, positive: true} = spec) do
-      base = %{type: "integer", minimum: 1}
+      base =
+        case Map.get(spec, :min_length) do
+          nil -> base
+          min_length -> Map.put(base, :minLength, min_length)
+        end
+
+      base =
+        case Map.get(spec, :max_length) do
+          nil -> base
+          max_length -> Map.put(base, :maxLength, max_length)
+        end
+
       add_description(base, spec)
     end
 
     defp field_to_json_schema(%{type: :integer} = spec) do
       base = %{type: "integer"}
+
+      # Handle backward compatibility: positive: true is equivalent to min: 1
+      min_value =
+        case {Map.get(spec, :min), Map.get(spec, :positive)} do
+          {nil, true} -> 1
+          {min, _} -> min
+        end
+
+      base =
+        case min_value do
+          nil -> base
+          min -> Map.put(base, :minimum, min)
+        end
+
+      base =
+        case Map.get(spec, :max) do
+          nil -> base
+          max -> Map.put(base, :maximum, max)
+        end
+
       add_description(base, spec)
     end
 
@@ -210,6 +254,19 @@ defmodule ExOutlines.Spec.Schema do
 
     defp field_to_json_schema(%{type: :number} = spec) do
       base = %{type: "number"}
+
+      base =
+        case Map.get(spec, :min) do
+          nil -> base
+          min -> Map.put(base, :minimum, min)
+        end
+
+      base =
+        case Map.get(spec, :max) do
+          nil -> base
+          max -> Map.put(base, :maximum, max)
+        end
+
       add_description(base, spec)
     end
 
@@ -270,7 +327,9 @@ defmodule ExOutlines.Spec.Schema do
       end
     end
 
-    defp validate_field_type(_name, %{type: :string}, value) when is_binary(value), do: []
+    defp validate_field_type(name, %{type: :string} = spec, value) when is_binary(value) do
+      validate_string_constraints(name, spec, value)
+    end
 
     defp validate_field_type(name, %{type: :string}, value) do
       [
@@ -283,22 +342,11 @@ defmodule ExOutlines.Spec.Schema do
       ]
     end
 
-    defp validate_field_type(_name, %{type: :integer, positive: true}, value)
-         when is_integer(value) and value > 0,
-         do: []
-
-    defp validate_field_type(name, %{type: :integer, positive: true}, value)
-         when is_integer(value) do
-      [
-        %{
-          field: to_string(name),
-          expected: "positive integer (> 0)",
-          got: value,
-          message: "Field '#{name}' must be a positive integer (greater than 0)"
-        }
-      ]
+    defp validate_field_type(name, %{type: :integer} = spec, value) when is_integer(value) do
+      validate_integer_constraints(name, spec, value)
     end
 
+    # Backward compatibility: non-integer with positive: true should show "positive integer" message
     defp validate_field_type(name, %{type: :integer, positive: true}, value) do
       [
         %{
@@ -309,8 +357,6 @@ defmodule ExOutlines.Spec.Schema do
         }
       ]
     end
-
-    defp validate_field_type(_name, %{type: :integer}, value) when is_integer(value), do: []
 
     defp validate_field_type(name, %{type: :integer}, value) do
       [
@@ -336,7 +382,9 @@ defmodule ExOutlines.Spec.Schema do
       ]
     end
 
-    defp validate_field_type(_name, %{type: :number}, value) when is_number(value), do: []
+    defp validate_field_type(name, %{type: :number} = spec, value) when is_number(value) do
+      validate_number_constraints(name, spec, value)
+    end
 
     defp validate_field_type(name, %{type: :number}, value) do
       [
@@ -362,6 +410,152 @@ defmodule ExOutlines.Spec.Schema do
           }
         ]
       end
+    end
+
+    defp validate_integer_constraints(name, spec, value) do
+      errors = []
+
+      # Handle backward compatibility: positive: true is equivalent to min: 1
+      {min_value, use_positive_message} =
+        case {Map.get(spec, :min), Map.get(spec, :positive)} do
+          {nil, true} -> {1, true}
+          {min, _} -> {min, false}
+        end
+
+      errors = errors ++ validate_min_constraint(name, min_value, value, use_positive_message)
+      errors = errors ++ validate_max_constraint(name, Map.get(spec, :max), value)
+
+      errors
+    end
+
+    defp validate_min_constraint(_name, nil, _value, _use_positive_message), do: []
+
+    defp validate_min_constraint(name, min, value, use_positive_message) when value < min do
+      {expected, message} =
+        if use_positive_message do
+          {"positive integer (> 0)", "Field '#{name}' must be a positive integer (greater than 0)"}
+        else
+          {"integer >= #{min}", "Field '#{name}' must be at least #{min}"}
+        end
+
+      [
+        %{
+          field: to_string(name),
+          expected: expected,
+          got: value,
+          message: message
+        }
+      ]
+    end
+
+    defp validate_min_constraint(_name, _min, _value, _use_positive_message), do: []
+
+    defp validate_max_constraint(_name, nil, _value), do: []
+
+    defp validate_max_constraint(name, max, value) when value > max do
+      [
+        %{
+          field: to_string(name),
+          expected: "integer <= #{max}",
+          got: value,
+          message: "Field '#{name}' must be at most #{max}"
+        }
+      ]
+    end
+
+    defp validate_max_constraint(_name, _max, _value), do: []
+
+    defp validate_number_constraints(name, spec, value) do
+      errors = []
+
+      errors =
+        case Map.get(spec, :min) do
+          nil ->
+            errors
+
+          min when value < min ->
+            [
+              %{
+                field: to_string(name),
+                expected: "number >= #{min}",
+                got: value,
+                message: "Field '#{name}' must be at least #{min}"
+              }
+              | errors
+            ]
+
+          _ ->
+            errors
+        end
+
+      errors =
+        case Map.get(spec, :max) do
+          nil ->
+            errors
+
+          max when value > max ->
+            [
+              %{
+                field: to_string(name),
+                expected: "number <= #{max}",
+                got: value,
+                message: "Field '#{name}' must be at most #{max}"
+              }
+              | errors
+            ]
+
+          _ ->
+            errors
+        end
+
+      Enum.reverse(errors)
+    end
+
+    defp validate_string_constraints(name, spec, value) do
+      errors = []
+      length = String.length(value)
+
+      errors =
+        case Map.get(spec, :min_length) do
+          nil ->
+            errors
+
+          min_length when length < min_length ->
+            [
+              %{
+                field: to_string(name),
+                expected: "string with at least #{min_length} characters",
+                got: value,
+                message: "Field '#{name}' must be at least #{min_length} characters"
+              }
+              | errors
+            ]
+
+          _ ->
+            errors
+        end
+
+      errors =
+        case Map.get(spec, :max_length) do
+          nil ->
+            errors
+
+          max_length when length > max_length ->
+            [
+              %{
+                field: to_string(name),
+                expected: "string with at most #{max_length} characters",
+                got: value,
+                message: "Field '#{name}' must be at most #{max_length} characters"
+              }
+              | errors
+            ]
+
+          _ ->
+            errors
+        end
+
+      Enum.reverse(errors)
     end
   end
 end
