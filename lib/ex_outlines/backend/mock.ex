@@ -84,7 +84,7 @@ defmodule ExOutlines.Backend.Mock do
       iex> is_struct(mock, ExOutlines.Backend.Mock)
       true
   """
-  @spec always_fail(term()) :: t()
+  @spec always_fail(term()) :: %ExOutlines.Backend.Mock{:agent_pid => pid(), :call_count => 0}
   def always_fail(error) do
     always({:error, error})
   end
