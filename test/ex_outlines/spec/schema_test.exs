@@ -1751,4 +1751,249 @@ defmodule ExOutlines.Spec.SchemaTest do
       assert error.message =~ "must match pattern"
     end
   end
+
+  describe "union type validation" do
+    test "validates union of string | integer" do
+      schema =
+        Schema.new(%{
+          id: %{type: {:union, [%{type: :string}, %{type: :integer}]}, required: true}
+        })
+
+      # String is valid
+      assert {:ok, result} = Spec.validate(schema, %{"id" => "ABC123"})
+      assert result.id == "ABC123"
+
+      # Integer is valid
+      assert {:ok, result} = Spec.validate(schema, %{"id" => 42})
+      assert result.id == 42
+    end
+
+    test "fails when no union type matches" do
+      schema =
+        Schema.new(%{
+          id: %{type: {:union, [%{type: :string}, %{type: :integer}]}, required: true}
+        })
+
+      assert {:error, diag} = Spec.validate(schema, %{"id" => true})
+      error = hd(diag.errors)
+      assert error.field == "id"
+      assert error.message =~ "must match one of the following types"
+      assert error.message =~ "String"
+      assert error.message =~ "Integer"
+    end
+
+    test "validates nullable field (type | null)" do
+      schema =
+        Schema.new(%{
+          nickname: %{type: {:union, [%{type: :string}, %{type: :null}]}}
+        })
+
+      # String is valid
+      assert {:ok, result} = Spec.validate(schema, %{"nickname" => "Bob"})
+      assert result.nickname == "Bob"
+
+      # Null is valid
+      assert {:ok, result} = Spec.validate(schema, %{"nickname" => nil})
+      assert is_nil(result.nickname)
+    end
+
+    test "validates null type" do
+      schema =
+        Schema.new(%{
+          deleted: %{type: :null}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"deleted" => nil})
+      assert is_nil(result.deleted)
+
+      assert {:error, diag} = Spec.validate(schema, %{"deleted" => "not null"})
+      error = hd(diag.errors)
+      assert error.message =~ "must be null"
+    end
+
+    test "validates union with constrained types" do
+      schema =
+        Schema.new(%{
+          code: %{
+            type:
+              {:union,
+               [
+                 %{type: :string, pattern: ~r/^[A-Z]{3}$/},
+                 %{type: :integer, min: 100, max: 999}
+               ]},
+            required: true
+          }
+        })
+
+      # Valid string code
+      assert {:ok, result} = Spec.validate(schema, %{"code" => "ABC"})
+      assert result.code == "ABC"
+
+      # Valid integer code
+      assert {:ok, result} = Spec.validate(schema, %{"code" => 500})
+      assert result.code == 500
+
+      # String too short
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "AB"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match one of the following types"
+
+      # Integer too small
+      assert {:error, diag} = Spec.validate(schema, %{"code" => 50})
+      error = hd(diag.errors)
+      assert error.message =~ "must match one of the following types"
+    end
+
+    test "validates union of three types" do
+      schema =
+        Schema.new(%{
+          value: %{
+            type:
+              {:union,
+               [
+                 %{type: :string},
+                 %{type: :integer},
+                 %{type: :boolean}
+               ]}
+          }
+        })
+
+      assert {:ok, %{value: "text"}} = Spec.validate(schema, %{"value" => "text"})
+      assert {:ok, %{value: 123}} = Spec.validate(schema, %{"value" => 123})
+      assert {:ok, %{value: true}} = Spec.validate(schema, %{"value" => true})
+      assert {:ok, %{value: false}} = Spec.validate(schema, %{"value" => false})
+    end
+
+    test "validates union with complex types (object | string)" do
+      person_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true}
+        })
+
+      schema =
+        Schema.new(%{
+          contact: %{
+            type:
+              {:union,
+               [
+                 %{type: {:object, person_schema}},
+                 %{type: :string, format: :email}
+               ]}
+          }
+        })
+
+      # Object is valid
+      assert {:ok, result} = Spec.validate(schema, %{"contact" => %{"name" => "Alice"}})
+      assert result.contact.name == "Alice"
+
+      # Email string is valid
+      assert {:ok, result} = Spec.validate(schema, %{"contact" => "alice@example.com"})
+      assert result.contact == "alice@example.com"
+
+      # Invalid email string fails
+      assert {:error, diag} = Spec.validate(schema, %{"contact" => "not-an-email"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match one of the following types"
+    end
+
+    test "validates union in nested object" do
+      schema =
+        Schema.new(%{
+          settings: %{
+            type:
+              {:object,
+               Schema.new(%{
+                 max_retry: %{type: {:union, [%{type: :integer}, %{type: :null}]}}
+               })},
+            required: true
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"settings" => %{"max_retry" => 5}})
+      assert result.settings.max_retry == 5
+
+      assert {:ok, result} = Spec.validate(schema, %{"settings" => %{"max_retry" => nil}})
+      assert is_nil(result.settings.max_retry)
+    end
+
+    test "validates union in array items" do
+      schema =
+        Schema.new(%{
+          values: %{
+            type: {:array, %{type: {:union, [%{type: :string}, %{type: :integer}]}}},
+            required: true
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"values" => ["text", 123, "more", 456]})
+      assert result.values == ["text", 123, "more", 456]
+
+      assert {:error, diag} = Spec.validate(schema, %{"values" => ["text", true, 123]})
+      error = hd(diag.errors)
+      assert error.field == "values[1]"
+      assert error.message =~ "must match one of the following types"
+    end
+
+    test "JSON Schema generation for union types" do
+      schema =
+        Schema.new(%{
+          id: %{type: {:union, [%{type: :string}, %{type: :integer}]}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      id_schema = json_schema.properties.id
+
+      assert Map.has_key?(id_schema, :oneOf)
+      assert length(id_schema.oneOf) == 2
+
+      types = Enum.map(id_schema.oneOf, & &1[:type])
+      assert "string" in types
+      assert "integer" in types
+    end
+
+    test "JSON Schema generation for nullable field" do
+      schema =
+        Schema.new(%{
+          nickname: %{type: {:union, [%{type: :string}, %{type: :null}]}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      nickname_schema = json_schema.properties.nickname
+
+      assert Map.has_key?(nickname_schema, :oneOf)
+      assert length(nickname_schema.oneOf) == 2
+
+      types = Enum.map(nickname_schema.oneOf, & &1[:type])
+      assert "string" in types
+      assert "null" in types
+    end
+
+    test "JSON Schema generation for union with constraints" do
+      schema =
+        Schema.new(%{
+          code: %{
+            type:
+              {:union,
+               [
+                 %{type: :string, min_length: 3, max_length: 10},
+                 %{type: :integer, min: 100, max: 999}
+               ]}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      code_schema = json_schema.properties.code
+
+      assert Map.has_key?(code_schema, :oneOf)
+      assert length(code_schema.oneOf) == 2
+
+      string_spec = Enum.find(code_schema.oneOf, &(&1[:type] == "string"))
+      assert string_spec[:minLength] == 3
+      assert string_spec[:maxLength] == 10
+
+      integer_spec = Enum.find(code_schema.oneOf, &(&1[:type] == "integer"))
+      assert integer_spec[:minimum] == 100
+      assert integer_spec[:maximum] == 999
+    end
+  end
 end
