@@ -61,6 +61,23 @@ Build resilient applications with proper error handling.
 
 ---
 
+### [Ecto Schema Adapter](ecto_schema_adapter.md)
+
+Reuse existing Ecto schemas with ExOutlines.
+
+**Topics Covered:**
+- Converting Ecto schemas to ExOutlines format
+- Automatic validation extraction from changesets
+- Embedded schemas and Ecto.Enum support
+- Integration patterns for Phoenix applications
+- Best practices for schema reuse
+
+**Best For:** Developers with existing Ecto schemas who want to avoid duplication
+
+**Time to Complete:** 30-45 minutes
+
+---
+
 ## Quick Start
 
 New to ExOutlines? Follow this learning path:

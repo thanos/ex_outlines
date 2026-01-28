@@ -155,12 +155,15 @@ defmodule ExOutlines.BatchTest do
       success_schema = Schema.new(%{name: %{type: :string, required: true}})
       fail_schema = Schema.new(%{age: %{type: :integer, required: true}})
 
-      success_mock = Mock.new([{:ok, ~s({"name": "Alice"})}])
-      fail_mock = Mock.new([{:ok, ~s({"age": "invalid"})}])
+      # Create separate mocks for each task
+      success_mock1 = Mock.new([{:ok, ~s({"name": "Alice"})}])
+      success_mock2 = Mock.new([{:ok, ~s({"name": "Bob"})}])
+      # Fail mock needs 2 responses (initial + 1 retry)
+      fail_mock = Mock.new([{:ok, ~s({"age": "invalid"})}, {:ok, ~s({"age": "invalid"})}])
 
       tasks = [
-        {success_schema, [backend: Mock, backend_opts: [mock: success_mock]]},
-        {success_schema, [backend: Mock, backend_opts: [mock: success_mock]]},
+        {success_schema, [backend: Mock, backend_opts: [mock: success_mock1]]},
+        {success_schema, [backend: Mock, backend_opts: [mock: success_mock2]]},
         {fail_schema, [backend: Mock, backend_opts: [mock: fail_mock], max_retries: 1]}
       ]
 
@@ -248,15 +251,19 @@ defmodule ExOutlines.BatchTest do
     test "each task is independent" do
       schema = Schema.new(%{value: %{type: :integer, required: true}})
 
-      success_mock = Mock.new([{:ok, ~s({"value": 1})}])
-      fail_mock = Mock.new([{:ok, ~s({"value": "bad"})}])
+      # Create separate mocks for each task
+      success_mock1 = Mock.new([{:ok, ~s({"value": 1})}])
+      fail_mock1 = Mock.new([{:ok, ~s({"value": "bad"})}, {:ok, ~s({"value": "bad"})}])
+      success_mock2 = Mock.new([{:ok, ~s({"value": 1})}])
+      fail_mock2 = Mock.new([{:ok, ~s({"value": "bad"})}, {:ok, ~s({"value": "bad"})}])
+      success_mock3 = Mock.new([{:ok, ~s({"value": 1})}])
 
       tasks = [
-        {schema, [backend: Mock, backend_opts: [mock: success_mock]]},
-        {schema, [backend: Mock, backend_opts: [mock: fail_mock], max_retries: 1]},
-        {schema, [backend: Mock, backend_opts: [mock: success_mock]]},
-        {schema, [backend: Mock, backend_opts: [mock: fail_mock], max_retries: 1]},
-        {schema, [backend: Mock, backend_opts: [mock: success_mock]]}
+        {schema, [backend: Mock, backend_opts: [mock: success_mock1]]},
+        {schema, [backend: Mock, backend_opts: [mock: fail_mock1], max_retries: 1]},
+        {schema, [backend: Mock, backend_opts: [mock: success_mock2]]},
+        {schema, [backend: Mock, backend_opts: [mock: fail_mock2], max_retries: 1]},
+        {schema, [backend: Mock, backend_opts: [mock: success_mock3]]}
       ]
 
       results = ExOutlines.generate_batch(tasks)

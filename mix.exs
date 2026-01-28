@@ -43,6 +43,7 @@ defmodule ExOutlines.MixProject do
     [
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.2"},
+      {:ecto, "~> 3.11", optional: true},
       {:benchee, "~> 1.3", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
