@@ -2,7 +2,7 @@ if Code.ensure_loaded?(Ecto) do
   defmodule ExOutlines.EctoTest do
     use ExUnit.Case, async: true
 
-    alias ExOutlines.{Spec.Schema, Ecto, Diagnostics}
+    alias ExOutlines.{Diagnostics, Ecto, Spec.Schema}
 
     describe "normalize_field_spec/1 - length" do
       test "normalizes length with min and max" do
@@ -286,7 +286,7 @@ if Code.ensure_loaded?(Ecto) do
         assert {:error, %Diagnostics{} = diag} = Ecto.changeset_to_diagnostics(changeset)
 
         # Should have multiple errors
-        assert length(diag.errors) > 0
+        assert Enum.empty?(diag.errors) == false
 
         # Check that errors are properly formatted
         assert Enum.any?(diag.errors, fn error -> String.contains?(error.message, "email") end)
@@ -297,7 +297,8 @@ if Code.ensure_loaded?(Ecto) do
         changeset = TestSchema.changeset(%TestSchema{}, %{})
 
         assert {:error, %Diagnostics{} = diag} = Ecto.changeset_to_diagnostics(changeset)
-        assert length(diag.errors) >= 2 # email and username required
+        # email and username required
+        assert length(diag.errors) >= 2
       end
 
       test "includes field names in error messages" do
@@ -584,7 +585,7 @@ if Code.ensure_loaded?(Ecto) do
         }
 
         assert {:error, diagnostics} = ExOutlines.Spec.validate(schema, invalid_data)
-        assert length(diagnostics.errors) > 0
+        assert Enum.empty?(diagnostics.errors) == false
       end
     end
   end
