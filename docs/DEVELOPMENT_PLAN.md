@@ -433,7 +433,7 @@ Some steps add:
 | 12. Anthropic Backend | ✅ Complete | 243 | Native Anthropic Claude API backend |
 | 13. Batch Processing | ✅ Complete | 261 | Concurrent batch processing with Task.async_stream |
 | 14. How-To Guides | ✅ Complete | 229 | Phoenix, Testing, Error Handling guides |
-| 15. Benchmarks | ⏳ Pending | - | - |
+| 15. Benchmarks | ✅ Complete | 288 | Benchee suite with 39 scenarios across 3 benchmarks |
 
 ---
 
