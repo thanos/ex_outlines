@@ -53,6 +53,7 @@ defmodule ExOutlines.Backend.Mock do
       iex> is_struct(mock, ExOutlines.Backend.Mock)
       true
   """
+  @dialyzer {:nowarn_function, new: 1}
   @spec new([response()]) :: t()
   def new(responses) when is_list(responses) do
     {:ok, agent_pid} = Agent.start_link(fn -> {responses, 0} end)
@@ -68,6 +69,7 @@ defmodule ExOutlines.Backend.Mock do
       iex> is_struct(mock, ExOutlines.Backend.Mock)
       true
   """
+  @dialyzer {:nowarn_function, always: 1}
   @spec always(response()) :: t()
   def always(response) do
     # For always, we use an infinite list (repeat the response)
@@ -84,7 +86,8 @@ defmodule ExOutlines.Backend.Mock do
       iex> is_struct(mock, ExOutlines.Backend.Mock)
       true
   """
-  @spec always_fail(term()) :: %ExOutlines.Backend.Mock{:agent_pid => pid(), :call_count => 0}
+  @dialyzer {:nowarn_function, always_fail: 1}
+  @spec always_fail(term()) :: t()
   def always_fail(error) do
     always({:error, error})
   end
