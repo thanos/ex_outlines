@@ -907,4 +907,1093 @@ defmodule ExOutlines.Spec.SchemaTest do
       refute Map.has_key?(ratio_schema, :maximum)
     end
   end
+
+  describe "array validation" do
+    test "validates array of strings" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, required: true}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"tags" => ["elixir", "phoenix"]})
+      assert result.tags == ["elixir", "phoenix"]
+    end
+
+    test "validates empty array" do
+      schema = Schema.new(%{tags: %{type: {:array, %{type: :string}}}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"tags" => []})
+      assert result.tags == []
+    end
+
+    test "validates array of integers" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"scores" => [1, 2, 3, 100]})
+      assert result.scores == [1, 2, 3, 100]
+    end
+
+    test "rejects non-array value" do
+      schema = Schema.new(%{tags: %{type: {:array, %{type: :string}}}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"tags" => "not-an-array"})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "must be an array"
+    end
+
+    test "validates min_items constraint" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, min_items: 1}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two"]})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"tags" => []})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "at least 1 item"
+    end
+
+    test "validates max_items constraint" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, max_items: 3}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two", "three"]})
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"tags" => ["one", "two", "three", "four"]})
+
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "at most 3 items"
+    end
+
+    test "validates item count range (min and max)" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, min_items: 2, max_items: 5}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two", "three"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["a", "b", "c", "d", "e"]})
+
+      # Too few
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["one"]})
+      assert hd(diag.errors).message =~ "at least 2 items"
+
+      # Too many
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["a", "b", "c", "d", "e", "f"]})
+      assert hd(diag.errors).message =~ "at most 5 items"
+    end
+
+    test "validates unique_items constraint" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, unique_items: true}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["a", "b", "c"]})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"tags" => ["a", "b", "a"]})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "unique items"
+      assert error.message =~ "duplicate"
+    end
+
+    test "validates item types" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer}}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"scores" => [1, "two", 3]})
+
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "scores[1]"
+      assert error.message =~ "must be an integer"
+    end
+
+    test "validates item constraints (string length)" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string, min_length: 2, max_length: 10}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["ab", "hello", "1234567890"]})
+
+      # Item too short
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["a", "hello"]})
+      error = hd(diag.errors)
+      assert error.field == "tags[0]"
+      assert error.message =~ "at least 2 characters"
+
+      # Item too long
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["hello", "12345678901"]})
+      error = hd(diag.errors)
+      assert error.field == "tags[1]"
+      assert error.message =~ "at most 10 characters"
+    end
+
+    test "validates item constraints (integer range)" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, min: 0, max: 100}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"scores" => [0, 50, 100]})
+
+      # Item below minimum
+      assert {:error, diag} = Spec.validate(schema, %{"scores" => [50, -1, 75]})
+      error = hd(diag.errors)
+      assert error.field == "scores[1]"
+      assert error.message =~ "at least 0"
+
+      # Item above maximum
+      assert {:error, diag} = Spec.validate(schema, %{"scores" => [50, 101, 75]})
+      error = hd(diag.errors)
+      assert error.field == "scores[1]"
+      assert error.message =~ "at most 100"
+    end
+
+    test "validates multiple invalid items (collects all errors)" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, min: 0, max: 100}}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"scores" => [-1, 50, 150]})
+
+      assert length(diag.errors) == 2
+      assert Enum.any?(diag.errors, fn e -> e.field == "scores[0]" end)
+      assert Enum.any?(diag.errors, fn e -> e.field == "scores[2]" end)
+    end
+
+    test "validates array of enums" do
+      schema =
+        Schema.new(%{
+          categories: %{type: {:array, %{type: {:enum, ["tech", "business", "health"]}}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"categories" => ["tech", "business"]})
+
+      assert {:error, diag} = Spec.validate(schema, %{"categories" => ["tech", "invalid"]})
+      error = hd(diag.errors)
+      assert error.field == "categories[1]"
+      assert error.message =~ "must be one of"
+    end
+
+    test "validates array of booleans" do
+      schema =
+        Schema.new(%{
+          flags: %{type: {:array, %{type: :boolean}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"flags" => [true, false, true]})
+      assert result.flags == [true, false, true]
+
+      assert {:error, diag} = Spec.validate(schema, %{"flags" => [true, "not-bool"]})
+      error = hd(diag.errors)
+      assert error.field == "flags[1]"
+      assert error.message =~ "must be a boolean"
+    end
+
+    test "validates array of numbers (floats)" do
+      schema =
+        Schema.new(%{
+          values: %{type: {:array, %{type: :number, min: 0.0, max: 1.0}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"values" => [0.0, 0.5, 1.0]})
+
+      assert {:error, diag} = Spec.validate(schema, %{"values" => [0.5, 1.5]})
+      error = hd(diag.errors)
+      assert error.field == "values[1]"
+      assert error.message =~ "at most 1.0"
+    end
+
+    test "JSON Schema generation for arrays" do
+      schema =
+        Schema.new(%{
+          tags: %{
+            type: {:array, %{type: :string, min_length: 2, max_length: 20}},
+            min_items: 1,
+            max_items: 10,
+            unique_items: true
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      array_schema = json_schema.properties.tags
+
+      assert array_schema[:type] == "array"
+      assert array_schema[:minItems] == 1
+      assert array_schema[:maxItems] == 10
+      assert array_schema[:uniqueItems] == true
+
+      items = array_schema[:items]
+      assert items[:type] == "string"
+      assert items[:minLength] == 2
+      assert items[:maxLength] == 20
+    end
+
+    test "JSON Schema generation for integer array" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, min: 0, max: 100}}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      array_schema = json_schema.properties.scores
+
+      assert array_schema[:type] == "array"
+      items = array_schema[:items]
+      assert items[:type] == "integer"
+      assert items[:minimum] == 0
+      assert items[:maximum] == 100
+    end
+
+    test "optional array field (not provided)" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, required: false}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{})
+      refute Map.has_key?(result, :tags)
+    end
+  end
+
+  describe "nested object validation" do
+    test "validates nested object (1 level)" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{"city" => "NYC", "zip_code" => "10001"}
+      }
+
+      assert {:ok, result} = Spec.validate(user_schema, input)
+      assert result.name == "Alice"
+      assert result.address.city == "NYC"
+      assert result.address.zip_code == "10001"
+    end
+
+    test "validates deeply nested objects (3 levels)" do
+      location_schema =
+        Schema.new(%{
+          lat: %{type: :number, required: true},
+          lng: %{type: :number, required: true}
+        })
+
+      address_schema =
+        Schema.new(%{
+          street: %{type: :string, required: true},
+          location: %{type: {:object, location_schema}, required: true}
+        })
+
+      company_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Acme Corp",
+        "address" => %{
+          "street" => "123 Main St",
+          "location" => %{"lat" => 40.7128, "lng" => -74.0060}
+        }
+      }
+
+      assert {:ok, result} = Spec.validate(company_schema, input)
+      assert result.name == "Acme Corp"
+      assert result.address.street == "123 Main St"
+      assert result.address.location.lat == 40.7128
+      assert result.address.location.lng == -74.0060
+    end
+
+    test "error messages include full path" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true, min_length: 5}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{"zip_code" => "123"}
+      }
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(user_schema, input)
+      errors = diag.errors
+
+      # Should have error for missing city
+      assert Enum.any?(errors, fn e -> e.field == "address.city" end)
+      missing_city = Enum.find(errors, fn e -> e.field == "address.city" end)
+      assert missing_city.message =~ "address.city"
+
+      # Should have error for zip_code too short
+      assert Enum.any?(errors, fn e -> e.field == "address.zip_code" end)
+      short_zip = Enum.find(errors, fn e -> e.field == "address.zip_code" end)
+      assert short_zip.message =~ "address.zip_code"
+      assert short_zip.message =~ "at least 5"
+    end
+
+    test "handles multiple errors in nested object" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{}
+      }
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(user_schema, input)
+      assert length(diag.errors) == 2
+
+      fields = Enum.map(diag.errors, & &1.field)
+      assert "address.city" in fields
+      assert "address.zip_code" in fields
+    end
+
+    test "rejects non-map value for nested object" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(user_schema, %{"address" => "not-a-map"})
+
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "address"
+      assert error.message =~ "must be an object"
+    end
+
+    test "nested object with array field" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          phone_numbers: %{type: {:array, %{type: :string}}, min_items: 1}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      input = %{
+        "name" => "Alice",
+        "address" => %{
+          "city" => "NYC",
+          "phone_numbers" => ["555-0100", "555-0200"]
+        }
+      }
+
+      assert {:ok, result} = Spec.validate(user_schema, input)
+      assert result.address.phone_numbers == ["555-0100", "555-0200"]
+    end
+
+    test "nested object with constrained strings" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true, min_length: 2, max_length: 50},
+          state: %{type: :string, required: true, min_length: 2, max_length: 2}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      # Valid
+      assert {:ok, _} =
+               Spec.validate(user_schema, %{
+                 "address" => %{"city" => "NYC", "state" => "NY"}
+               })
+
+      # Invalid - state too long
+      assert {:error, diag} =
+               Spec.validate(user_schema, %{
+                 "address" => %{"city" => "NYC", "state" => "NYY"}
+               })
+
+      error = hd(diag.errors)
+      assert error.field == "address.state"
+      assert error.message =~ "address.state"
+      assert error.message =~ "at most 2"
+    end
+
+    test "optional nested object (when not provided)" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: false}
+        })
+
+      assert {:ok, result} = Spec.validate(user_schema, %{"name" => "Alice"})
+      assert result.name == "Alice"
+      refute Map.has_key?(result, :address)
+    end
+
+    test "empty nested object validates against schema" do
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: false}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      assert {:ok, result} = Spec.validate(user_schema, %{"address" => %{}})
+      assert result.address == %{}
+    end
+
+    test "JSON Schema generation for nested objects" do
+      address_schema =
+        Schema.new(%{
+          street: %{type: :string, required: true},
+          city: %{type: :string, required: true},
+          zip_code: %{type: :string, required: false}
+        })
+
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      json_schema = Spec.to_schema(user_schema)
+
+      assert json_schema.type == "object"
+      assert json_schema.required == ["address", "name"]
+
+      address_json = json_schema.properties.address
+      assert address_json[:type] == "object"
+      assert address_json[:properties][:street][:type] == "string"
+      assert address_json[:properties][:city][:type] == "string"
+      assert address_json[:properties][:zip_code][:type] == "string"
+      assert Enum.sort(address_json[:required]) == ["city", "street"]
+    end
+
+    test "deeply nested JSON Schema generation" do
+      location_schema =
+        Schema.new(%{
+          lat: %{type: :number, required: true},
+          lng: %{type: :number, required: true}
+        })
+
+      address_schema =
+        Schema.new(%{
+          city: %{type: :string, required: true},
+          location: %{type: {:object, location_schema}, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      json_schema = Spec.to_schema(user_schema)
+
+      address_json = json_schema.properties.address
+      assert address_json[:type] == "object"
+
+      location_json = address_json[:properties][:location]
+      assert location_json[:type] == "object"
+      assert location_json[:properties][:lat][:type] == "number"
+      assert location_json[:properties][:lng][:type] == "number"
+      assert Enum.sort(location_json[:required]) == ["lat", "lng"]
+    end
+
+    test "nested object with integer constraints" do
+      contact_schema =
+        Schema.new(%{
+          age: %{type: :integer, required: true, min: 0, max: 120}
+        })
+
+      user_schema =
+        Schema.new(%{
+          contact: %{type: {:object, contact_schema}, required: true}
+        })
+
+      # Valid
+      assert {:ok, _} = Spec.validate(user_schema, %{"contact" => %{"age" => 30}})
+
+      # Invalid - age too high
+      assert {:error, diag} = Spec.validate(user_schema, %{"contact" => %{"age" => 150}})
+      error = hd(diag.errors)
+      assert error.field == "contact.age"
+      assert error.message =~ "contact.age"
+    end
+
+    test "nested object with enum field" do
+      profile_schema =
+        Schema.new(%{
+          role: %{type: {:enum, ["admin", "user", "guest"]}, required: true}
+        })
+
+      user_schema =
+        Schema.new(%{
+          profile: %{type: {:object, profile_schema}, required: true}
+        })
+
+      # Valid
+      assert {:ok, result} = Spec.validate(user_schema, %{"profile" => %{"role" => "admin"}})
+      assert result.profile.role == "admin"
+
+      # Invalid
+      assert {:error, diag} = Spec.validate(user_schema, %{"profile" => %{"role" => "invalid"}})
+      error = hd(diag.errors)
+      assert error.field == "profile.role"
+    end
+  end
+
+  describe "regex pattern validation" do
+    test "validates custom regex pattern" do
+      schema =
+        Schema.new(%{
+          username: %{type: :string, pattern: ~r/^[a-z0-9_]+$/i}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "alice_123"})
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "USER_NAME"})
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"username" => "alice@123"})
+
+      error = hd(diag.errors)
+      assert error.field == "username"
+      assert error.message =~ "must match pattern"
+    end
+
+    test "validates string pattern (compiles to Regex)" do
+      schema =
+        Schema.new(%{
+          code: %{type: :string, pattern: "^[A-Z]{3}\\d{3}$"}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"code" => "ABC123"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "AB123"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match pattern"
+    end
+
+    test "validates built-in email format" do
+      schema = Schema.new(%{email: %{type: :string, format: :email}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "test@example.com"})
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "user.name+tag@domain.co.uk"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"email" => "invalid-email"})
+      error = hd(diag.errors)
+      assert error.field == "email"
+      assert error.message =~ "valid email"
+    end
+
+    test "validates built-in url format" do
+      schema = Schema.new(%{website: %{type: :string, format: :url}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"website" => "https://example.com"})
+      assert {:ok, _} = Spec.validate(schema, %{"website" => "http://localhost:3000"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"website" => "not-a-url"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid url"
+    end
+
+    test "validates built-in uuid format" do
+      schema = Schema.new(%{id: %{type: :string, format: :uuid}})
+
+      assert {:ok, _} =
+               Spec.validate(schema, %{"id" => "550e8400-e29b-41d4-a716-446655440000"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"id" => "not-a-uuid"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid uuid"
+    end
+
+    test "validates built-in phone format" do
+      schema = Schema.new(%{phone: %{type: :string, format: :phone}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"phone" => "555-123-4567"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"phone" => "5551234567"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid phone"
+    end
+
+    test "validates built-in date format (YYYY-MM-DD)" do
+      schema = Schema.new(%{birth_date: %{type: :string, format: :date}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"birth_date" => "1990-01-15"})
+      assert {:ok, _} = Spec.validate(schema, %{"birth_date" => "2024-12-31"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"birth_date" => "01/15/1990"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid date"
+    end
+
+    test "combines pattern with length constraints" do
+      schema =
+        Schema.new(%{
+          code: %{type: :string, pattern: ~r/^[A-Z]+$/, min_length: 2, max_length: 5}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"code" => "ABC"})
+
+      # Too short (but matches pattern)
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "A"})
+      error = hd(diag.errors)
+      assert error.message =~ "at least 2 characters"
+
+      # Too long (but matches pattern)
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "ABCDEF"})
+      error = hd(diag.errors)
+      assert error.message =~ "at most 5 characters"
+
+      # Right length but doesn't match pattern
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "abc"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match pattern"
+    end
+
+    test "combines format with length constraints" do
+      schema =
+        Schema.new(%{
+          email: %{type: :string, format: :email, max_length: 50}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "test@example.com"})
+
+      # Too long but valid email format
+      long_email = "very.long.email.address.that.exceeds@fiftychars.com"
+      assert {:error, diag} = Spec.validate(schema, %{"email" => long_email})
+      error = hd(diag.errors)
+      assert error.message =~ "at most 50 characters"
+    end
+
+    test "both pattern and format specified (both must match)" do
+      # Custom pattern that's stricter than email format
+      schema =
+        Schema.new(%{
+          email: %{
+            type: :string,
+            format: :email,
+            pattern: ~r/^[a-z0-9]+@[a-z]+\.[a-z]+$/
+          }
+        })
+
+      # Matches both
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "user@example.com"})
+
+      # Matches email format but not custom pattern (has dots and plus)
+      assert {:error, diag} =
+               Spec.validate(schema, %{"email" => "user.name+tag@example.com"})
+
+      # Should have error about pattern
+      assert Enum.any?(diag.errors, fn e -> e.message =~ "must match pattern" end)
+    end
+
+    test "JSON Schema generation includes pattern" do
+      schema =
+        Schema.new(%{
+          username: %{type: :string, pattern: ~r/^[a-z0-9_]+$/}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      username_schema = json_schema.properties.username
+
+      assert username_schema[:type] == "string"
+      assert username_schema[:pattern] == "^[a-z0-9_]+$"
+    end
+
+    test "JSON Schema generation includes format" do
+      schema =
+        Schema.new(%{
+          email: %{type: :string, format: :email},
+          website: %{type: :string, format: :url},
+          id: %{type: :string, format: :uuid}
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      assert json_schema.properties.email[:format] == "email"
+      assert json_schema.properties.website[:format] == "uri"
+      assert json_schema.properties.id[:format] == "uuid"
+    end
+
+    test "JSON Schema generation combines pattern and format" do
+      schema =
+        Schema.new(%{
+          email: %{
+            type: :string,
+            format: :email,
+            pattern: ~r/^[a-z]+@[a-z]+\.[a-z]+$/
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      email_schema = json_schema.properties.email
+
+      assert email_schema[:type] == "string"
+      assert email_schema[:format] == "email"
+      assert email_schema[:pattern] == "^[a-z]+@[a-z]+\\.[a-z]+$"
+    end
+
+    test "empty string with pattern (should fail)" do
+      schema =
+        Schema.new(%{
+          code: %{type: :string, pattern: ~r/^[A-Z]+$/}
+        })
+
+      assert {:error, diag} = Spec.validate(schema, %{"code" => ""})
+      error = hd(diag.errors)
+      assert error.message =~ "must match pattern"
+    end
+
+    test "pattern validation with nested object" do
+      address_schema =
+        Schema.new(%{
+          zip_code: %{type: :string, required: true, pattern: ~r/^\d{5}(-\d{4})?$/}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      # Valid zip codes
+      assert {:ok, _} =
+               Spec.validate(user_schema, %{"address" => %{"zip_code" => "12345"}})
+
+      assert {:ok, _} =
+               Spec.validate(user_schema, %{"address" => %{"zip_code" => "12345-6789"}})
+
+      # Invalid zip code
+      assert {:error, diag} =
+               Spec.validate(user_schema, %{"address" => %{"zip_code" => "123"}})
+
+      error = hd(diag.errors)
+      assert error.field == "address.zip_code"
+      assert error.message =~ "address.zip_code"
+    end
+
+    test "pattern validation in array items" do
+      schema =
+        Schema.new(%{
+          codes: %{type: {:array, %{type: :string, pattern: ~r/^[A-Z]{3}$/}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"codes" => ["ABC", "XYZ", "FOO"]})
+
+      assert {:error, diag} = Spec.validate(schema, %{"codes" => ["ABC", "ab", "XYZ"]})
+      error = hd(diag.errors)
+      assert error.field == "codes[1]"
+      assert error.message =~ "must match pattern"
+    end
+  end
+
+  describe "union type validation" do
+    test "validates union of string | integer" do
+      schema =
+        Schema.new(%{
+          id: %{type: {:union, [%{type: :string}, %{type: :integer}]}, required: true}
+        })
+
+      # String is valid
+      assert {:ok, result} = Spec.validate(schema, %{"id" => "ABC123"})
+      assert result.id == "ABC123"
+
+      # Integer is valid
+      assert {:ok, result} = Spec.validate(schema, %{"id" => 42})
+      assert result.id == 42
+    end
+
+    test "fails when no union type matches" do
+      schema =
+        Schema.new(%{
+          id: %{type: {:union, [%{type: :string}, %{type: :integer}]}, required: true}
+        })
+
+      assert {:error, diag} = Spec.validate(schema, %{"id" => true})
+      error = hd(diag.errors)
+      assert error.field == "id"
+      assert error.message =~ "must match one of the following types"
+      assert error.message =~ "String"
+      assert error.message =~ "Integer"
+    end
+
+    test "validates nullable field (type | null)" do
+      schema =
+        Schema.new(%{
+          nickname: %{type: {:union, [%{type: :string}, %{type: :null}]}}
+        })
+
+      # String is valid
+      assert {:ok, result} = Spec.validate(schema, %{"nickname" => "Bob"})
+      assert result.nickname == "Bob"
+
+      # Null is valid
+      assert {:ok, result} = Spec.validate(schema, %{"nickname" => nil})
+      assert is_nil(result.nickname)
+    end
+
+    test "validates null type" do
+      schema =
+        Schema.new(%{
+          deleted: %{type: :null}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"deleted" => nil})
+      assert is_nil(result.deleted)
+
+      assert {:error, diag} = Spec.validate(schema, %{"deleted" => "not null"})
+      error = hd(diag.errors)
+      assert error.message =~ "must be null"
+    end
+
+    test "validates union with constrained types" do
+      schema =
+        Schema.new(%{
+          code: %{
+            type:
+              {:union,
+               [
+                 %{type: :string, pattern: ~r/^[A-Z]{3}$/},
+                 %{type: :integer, min: 100, max: 999}
+               ]},
+            required: true
+          }
+        })
+
+      # Valid string code
+      assert {:ok, result} = Spec.validate(schema, %{"code" => "ABC"})
+      assert result.code == "ABC"
+
+      # Valid integer code
+      assert {:ok, result} = Spec.validate(schema, %{"code" => 500})
+      assert result.code == 500
+
+      # String too short
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "AB"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match one of the following types"
+
+      # Integer too small
+      assert {:error, diag} = Spec.validate(schema, %{"code" => 50})
+      error = hd(diag.errors)
+      assert error.message =~ "must match one of the following types"
+    end
+
+    test "validates union of three types" do
+      schema =
+        Schema.new(%{
+          value: %{
+            type:
+              {:union,
+               [
+                 %{type: :string},
+                 %{type: :integer},
+                 %{type: :boolean}
+               ]}
+          }
+        })
+
+      assert {:ok, %{value: "text"}} = Spec.validate(schema, %{"value" => "text"})
+      assert {:ok, %{value: 123}} = Spec.validate(schema, %{"value" => 123})
+      assert {:ok, %{value: true}} = Spec.validate(schema, %{"value" => true})
+      assert {:ok, %{value: false}} = Spec.validate(schema, %{"value" => false})
+    end
+
+    test "validates union with complex types (object | string)" do
+      person_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true}
+        })
+
+      schema =
+        Schema.new(%{
+          contact: %{
+            type:
+              {:union,
+               [
+                 %{type: {:object, person_schema}},
+                 %{type: :string, format: :email}
+               ]}
+          }
+        })
+
+      # Object is valid
+      assert {:ok, result} = Spec.validate(schema, %{"contact" => %{"name" => "Alice"}})
+      assert result.contact.name == "Alice"
+
+      # Email string is valid
+      assert {:ok, result} = Spec.validate(schema, %{"contact" => "alice@example.com"})
+      assert result.contact == "alice@example.com"
+
+      # Invalid email string fails
+      assert {:error, diag} = Spec.validate(schema, %{"contact" => "not-an-email"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match one of the following types"
+    end
+
+    test "validates union in nested object" do
+      schema =
+        Schema.new(%{
+          settings: %{
+            type:
+              {:object,
+               Schema.new(%{
+                 max_retry: %{type: {:union, [%{type: :integer}, %{type: :null}]}}
+               })},
+            required: true
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"settings" => %{"max_retry" => 5}})
+      assert result.settings.max_retry == 5
+
+      assert {:ok, result} = Spec.validate(schema, %{"settings" => %{"max_retry" => nil}})
+      assert is_nil(result.settings.max_retry)
+    end
+
+    test "validates union in array items" do
+      schema =
+        Schema.new(%{
+          values: %{
+            type: {:array, %{type: {:union, [%{type: :string}, %{type: :integer}]}}},
+            required: true
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"values" => ["text", 123, "more", 456]})
+      assert result.values == ["text", 123, "more", 456]
+
+      assert {:error, diag} = Spec.validate(schema, %{"values" => ["text", true, 123]})
+      error = hd(diag.errors)
+      assert error.field == "values[1]"
+      assert error.message =~ "must match one of the following types"
+    end
+
+    test "JSON Schema generation for union types" do
+      schema =
+        Schema.new(%{
+          id: %{type: {:union, [%{type: :string}, %{type: :integer}]}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      id_schema = json_schema.properties.id
+
+      assert Map.has_key?(id_schema, :oneOf)
+      assert length(id_schema.oneOf) == 2
+
+      types = Enum.map(id_schema.oneOf, & &1[:type])
+      assert "string" in types
+      assert "integer" in types
+    end
+
+    test "JSON Schema generation for nullable field" do
+      schema =
+        Schema.new(%{
+          nickname: %{type: {:union, [%{type: :string}, %{type: :null}]}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      nickname_schema = json_schema.properties.nickname
+
+      assert Map.has_key?(nickname_schema, :oneOf)
+      assert length(nickname_schema.oneOf) == 2
+
+      types = Enum.map(nickname_schema.oneOf, & &1[:type])
+      assert "string" in types
+      assert "null" in types
+    end
+
+    test "JSON Schema generation for union with constraints" do
+      schema =
+        Schema.new(%{
+          code: %{
+            type:
+              {:union,
+               [
+                 %{type: :string, min_length: 3, max_length: 10},
+                 %{type: :integer, min: 100, max: 999}
+               ]}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      code_schema = json_schema.properties.code
+
+      assert Map.has_key?(code_schema, :oneOf)
+      assert length(code_schema.oneOf) == 2
+
+      string_spec = Enum.find(code_schema.oneOf, &(&1[:type] == "string"))
+      assert string_spec[:minLength] == 3
+      assert string_spec[:maxLength] == 10
+
+      integer_spec = Enum.find(code_schema.oneOf, &(&1[:type] == "integer"))
+      assert integer_spec[:minimum] == 100
+      assert integer_spec[:maximum] == 999
+    end
+  end
 end

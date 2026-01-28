@@ -34,3 +34,5 @@ coveralls.json
 
 # Documentation output
 docs_output.txt
+
+/benchmarks/output/
