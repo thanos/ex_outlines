@@ -14,6 +14,16 @@ defmodule ExOutlines do
 
   @type generate_result :: {:ok, any()} | {:error, term()}
 
+  @type batch_opts :: [
+          max_concurrency: pos_integer(),
+          timeout: pos_integer(),
+          on_timeout: :kill_task | :continue,
+          ordered: boolean(),
+          telemetry_metadata: map()
+        ]
+
+  @type batch_result :: [generate_result()]
+
   @doc """
   Generate structured output conforming to a spec.
 
@@ -38,6 +48,101 @@ defmodule ExOutlines do
     with {:ok, config} <- validate_config(opts) do
       execute_generation(spec, config)
     end
+  end
+
+  @doc """
+  Generate structured outputs for multiple specs concurrently.
+
+  Leverages BEAM's concurrency model to process multiple generation requests
+  in parallel. Each task is independent and runs in its own process.
+
+  ## Options
+
+  - `:max_concurrency` - Maximum concurrent tasks (default: System.schedulers_online())
+  - `:timeout` - Timeout per task in milliseconds (default: 60_000)
+  - `:on_timeout` - How to handle timeouts: `:kill_task` or `:continue` (default: :kill_task)
+  - `:ordered` - Return results in input order (default: true)
+  - `:telemetry_metadata` - Additional telemetry context
+
+  ## Returns
+
+  List of results in the same order as input (if ordered: true). Each result is:
+  - `{:ok, result}` - Successfully generated and validated output
+  - `{:error, reason}` - Task failed (timeout, validation, backend error, etc.)
+
+  ## Examples
+
+      # Process multiple schemas concurrently
+      tasks = [
+        {user_schema, [backend: HTTP, backend_opts: [...]]},
+        {product_schema, [backend: HTTP, backend_opts: [...]]},
+        {order_schema, [backend: HTTP, backend_opts: [...]]}
+      ]
+
+      results = ExOutlines.generate_batch(tasks, max_concurrency: 3)
+
+      # Results match input order
+      [user_result, product_result, order_result] = results
+
+      # Handle mixed results
+      Enum.each(results, fn
+        {:ok, data} -> IO.inspect(data, label: "Success")
+        {:error, reason} -> IO.inspect(reason, label: "Error")
+      end)
+
+  """
+  @spec generate_batch([{ExOutlines.Spec.t(), generate_opts()}], batch_opts()) :: batch_result()
+  def generate_batch(spec_opts_list, batch_opts \\ []) do
+    max_concurrency =
+      Keyword.get(batch_opts, :max_concurrency, System.schedulers_online())
+
+    timeout = Keyword.get(batch_opts, :timeout, 60_000)
+    on_timeout = Keyword.get(batch_opts, :on_timeout, :kill_task)
+    ordered = Keyword.get(batch_opts, :ordered, true)
+    telemetry_metadata = Keyword.get(batch_opts, :telemetry_metadata, %{})
+
+    total_tasks = length(spec_opts_list)
+    start_time = System.monotonic_time()
+
+    :telemetry.execute(
+      [:ex_outlines, :batch, :start],
+      %{system_time: System.system_time(), total_tasks: total_tasks},
+      Map.merge(telemetry_metadata, %{max_concurrency: max_concurrency})
+    )
+
+    results =
+      spec_opts_list
+      |> Task.async_stream(
+        fn {spec, opts} -> generate(spec, opts) end,
+        max_concurrency: max_concurrency,
+        timeout: timeout,
+        on_timeout: on_timeout,
+        ordered: ordered
+      )
+      |> Enum.map(fn
+        {:ok, result} ->
+          result
+
+        {:exit, reason} ->
+          {:error, {:task_exit, reason}}
+      end)
+
+    duration = System.monotonic_time() - start_time
+    success_count = Enum.count(results, &match?({:ok, _}, &1))
+    error_count = total_tasks - success_count
+
+    :telemetry.execute(
+      [:ex_outlines, :batch, :stop],
+      %{
+        duration: duration,
+        total_tasks: total_tasks,
+        success_count: success_count,
+        error_count: error_count
+      },
+      telemetry_metadata
+    )
+
+    results
   end
 
   defp validate_config(opts) do
