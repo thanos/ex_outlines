@@ -1505,4 +1505,250 @@ defmodule ExOutlines.Spec.SchemaTest do
       assert error.field == "profile.role"
     end
   end
+
+  describe "regex pattern validation" do
+    test "validates custom regex pattern" do
+      schema =
+        Schema.new(%{
+          username: %{type: :string, pattern: ~r/^[a-z0-9_]+$/i}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "alice_123"})
+      assert {:ok, _} = Spec.validate(schema, %{"username" => "USER_NAME"})
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"username" => "alice@123"})
+
+      error = hd(diag.errors)
+      assert error.field == "username"
+      assert error.message =~ "must match pattern"
+    end
+
+    test "validates string pattern (compiles to Regex)" do
+      schema =
+        Schema.new(%{
+          code: %{type: :string, pattern: "^[A-Z]{3}\\d{3}$"}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"code" => "ABC123"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "AB123"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match pattern"
+    end
+
+    test "validates built-in email format" do
+      schema = Schema.new(%{email: %{type: :string, format: :email}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "test@example.com"})
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "user.name+tag@domain.co.uk"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"email" => "invalid-email"})
+      error = hd(diag.errors)
+      assert error.field == "email"
+      assert error.message =~ "valid email"
+    end
+
+    test "validates built-in url format" do
+      schema = Schema.new(%{website: %{type: :string, format: :url}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"website" => "https://example.com"})
+      assert {:ok, _} = Spec.validate(schema, %{"website" => "http://localhost:3000"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"website" => "not-a-url"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid url"
+    end
+
+    test "validates built-in uuid format" do
+      schema = Schema.new(%{id: %{type: :string, format: :uuid}})
+
+      assert {:ok, _} =
+               Spec.validate(schema, %{"id" => "550e8400-e29b-41d4-a716-446655440000"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"id" => "not-a-uuid"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid uuid"
+    end
+
+    test "validates built-in phone format" do
+      schema = Schema.new(%{phone: %{type: :string, format: :phone}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"phone" => "555-123-4567"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"phone" => "5551234567"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid phone"
+    end
+
+    test "validates built-in date format (YYYY-MM-DD)" do
+      schema = Schema.new(%{birth_date: %{type: :string, format: :date}})
+
+      assert {:ok, _} = Spec.validate(schema, %{"birth_date" => "1990-01-15"})
+      assert {:ok, _} = Spec.validate(schema, %{"birth_date" => "2024-12-31"})
+
+      assert {:error, diag} = Spec.validate(schema, %{"birth_date" => "01/15/1990"})
+      error = hd(diag.errors)
+      assert error.message =~ "valid date"
+    end
+
+    test "combines pattern with length constraints" do
+      schema =
+        Schema.new(%{
+          code: %{type: :string, pattern: ~r/^[A-Z]+$/, min_length: 2, max_length: 5}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"code" => "ABC"})
+
+      # Too short (but matches pattern)
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "A"})
+      error = hd(diag.errors)
+      assert error.message =~ "at least 2 characters"
+
+      # Too long (but matches pattern)
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "ABCDEF"})
+      error = hd(diag.errors)
+      assert error.message =~ "at most 5 characters"
+
+      # Right length but doesn't match pattern
+      assert {:error, diag} = Spec.validate(schema, %{"code" => "abc"})
+      error = hd(diag.errors)
+      assert error.message =~ "must match pattern"
+    end
+
+    test "combines format with length constraints" do
+      schema =
+        Schema.new(%{
+          email: %{type: :string, format: :email, max_length: 50}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "test@example.com"})
+
+      # Too long but valid email format
+      long_email = "very.long.email.address.that.exceeds@fiftychars.com"
+      assert {:error, diag} = Spec.validate(schema, %{"email" => long_email})
+      error = hd(diag.errors)
+      assert error.message =~ "at most 50 characters"
+    end
+
+    test "both pattern and format specified (both must match)" do
+      # Custom pattern that's stricter than email format
+      schema =
+        Schema.new(%{
+          email: %{
+            type: :string,
+            format: :email,
+            pattern: ~r/^[a-z0-9]+@[a-z]+\.[a-z]+$/
+          }
+        })
+
+      # Matches both
+      assert {:ok, _} = Spec.validate(schema, %{"email" => "user@example.com"})
+
+      # Matches email format but not custom pattern (has dots and plus)
+      assert {:error, diag} =
+               Spec.validate(schema, %{"email" => "user.name+tag@example.com"})
+
+      # Should have error about pattern
+      assert Enum.any?(diag.errors, fn e -> e.message =~ "must match pattern" end)
+    end
+
+    test "JSON Schema generation includes pattern" do
+      schema =
+        Schema.new(%{
+          username: %{type: :string, pattern: ~r/^[a-z0-9_]+$/}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      username_schema = json_schema.properties.username
+
+      assert username_schema[:type] == "string"
+      assert username_schema[:pattern] == "^[a-z0-9_]+$"
+    end
+
+    test "JSON Schema generation includes format" do
+      schema =
+        Schema.new(%{
+          email: %{type: :string, format: :email},
+          website: %{type: :string, format: :url},
+          id: %{type: :string, format: :uuid}
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      assert json_schema.properties.email[:format] == "email"
+      assert json_schema.properties.website[:format] == "uri"
+      assert json_schema.properties.id[:format] == "uuid"
+    end
+
+    test "JSON Schema generation combines pattern and format" do
+      schema =
+        Schema.new(%{
+          email: %{
+            type: :string,
+            format: :email,
+            pattern: ~r/^[a-z]+@[a-z]+\.[a-z]+$/
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      email_schema = json_schema.properties.email
+
+      assert email_schema[:type] == "string"
+      assert email_schema[:format] == "email"
+      assert email_schema[:pattern] == "^[a-z]+@[a-z]+\\.[a-z]+$"
+    end
+
+    test "empty string with pattern (should fail)" do
+      schema =
+        Schema.new(%{
+          code: %{type: :string, pattern: ~r/^[A-Z]+$/}
+        })
+
+      assert {:error, diag} = Spec.validate(schema, %{"code" => ""})
+      error = hd(diag.errors)
+      assert error.message =~ "must match pattern"
+    end
+
+    test "pattern validation with nested object" do
+      address_schema =
+        Schema.new(%{
+          zip_code: %{type: :string, required: true, pattern: ~r/^\d{5}(-\d{4})?$/}
+        })
+
+      user_schema =
+        Schema.new(%{
+          address: %{type: {:object, address_schema}, required: true}
+        })
+
+      # Valid zip codes
+      assert {:ok, _} =
+               Spec.validate(user_schema, %{"address" => %{"zip_code" => "12345"}})
+
+      assert {:ok, _} =
+               Spec.validate(user_schema, %{"address" => %{"zip_code" => "12345-6789"}})
+
+      # Invalid zip code
+      assert {:error, diag} =
+               Spec.validate(user_schema, %{"address" => %{"zip_code" => "123"}})
+
+      error = hd(diag.errors)
+      assert error.field == "address.zip_code"
+      assert error.message =~ "address.zip_code"
+    end
+
+    test "pattern validation in array items" do
+      schema =
+        Schema.new(%{
+          codes: %{type: {:array, %{type: :string, pattern: ~r/^[A-Z]{3}$/}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"codes" => ["ABC", "XYZ", "FOO"]})
+
+      assert {:error, diag} = Spec.validate(schema, %{"codes" => ["ABC", "ab", "XYZ"]})
+      error = hd(diag.errors)
+      assert error.field == "codes[1]"
+      assert error.message =~ "must match pattern"
+    end
+  end
 end

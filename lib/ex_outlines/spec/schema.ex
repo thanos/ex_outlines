@@ -28,6 +28,8 @@ defmodule ExOutlines.Spec.Schema do
   - `min_items` - For arrays, minimum number of items (optional)
   - `max_items` - For arrays, maximum number of items (optional)
   - `unique_items` - For arrays, whether items must be unique (default: false)
+  - `pattern` - For strings, custom regex pattern (Regex.t() or string)
+  - `format` - For strings, built-in format (:email, :url, :uuid, :phone, :date)
 
   ## Example
 
@@ -65,6 +67,13 @@ defmodule ExOutlines.Spec.Schema do
 
   alias ExOutlines.Diagnostics
 
+  # Built-in format patterns
+  @email_pattern ~r/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+  @url_pattern ~r/^https?:\/\/[^\s]+$/
+  @uuid_pattern ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  @phone_pattern ~r/^\d{3}-\d{3}-\d{4}$/
+  @date_pattern ~r/^\d{4}-\d{2}-\d{2}$/
+
   @type item_spec :: %{
           type: :string | :integer | :boolean | :number | {:enum, [any()]},
           min_length: non_neg_integer() | nil,
@@ -82,6 +91,8 @@ defmodule ExOutlines.Spec.Schema do
           | {:array, item_spec()}
           | {:object, t()}
 
+  @type format :: :email | :url | :uuid | :phone | :date
+
   @type field_spec :: %{
           type: field_type(),
           required: boolean(),
@@ -90,7 +101,12 @@ defmodule ExOutlines.Spec.Schema do
           min_length: non_neg_integer() | nil,
           max_length: pos_integer() | nil,
           min: number() | nil,
-          max: number() | nil
+          max: number() | nil,
+          min_items: non_neg_integer() | nil,
+          max_items: pos_integer() | nil,
+          unique_items: boolean(),
+          pattern: Regex.t() | nil,
+          format: format() | nil
         }
 
   @type t :: %__MODULE__{
@@ -141,10 +157,15 @@ defmodule ExOutlines.Spec.Schema do
       min_length: Keyword.get(opts, :min_length),
       max_length: Keyword.get(opts, :max_length),
       min: Keyword.get(opts, :min),
-      max: Keyword.get(opts, :max)
+      max: Keyword.get(opts, :max),
+      min_items: Keyword.get(opts, :min_items),
+      max_items: Keyword.get(opts, :max_items),
+      unique_items: Keyword.get(opts, :unique_items, false),
+      pattern: Keyword.get(opts, :pattern),
+      format: Keyword.get(opts, :format)
     }
 
-    %{schema | fields: Map.put(fields, name, field_spec)}
+    %{schema | fields: Map.put(fields, name, normalize_field_spec(field_spec))}
   end
 
   @doc """
@@ -170,6 +191,14 @@ defmodule ExOutlines.Spec.Schema do
   # Private helpers
 
   defp normalize_field_spec(spec) when is_map(spec) do
+    # Compile string pattern to Regex if needed
+    pattern =
+      case Map.get(spec, :pattern) do
+        nil -> nil
+        %Regex{} = regex -> regex
+        pattern when is_binary(pattern) -> Regex.compile!(pattern)
+      end
+
     %{
       type: Map.fetch!(spec, :type),
       required: Map.get(spec, :required, false),
@@ -181,9 +210,19 @@ defmodule ExOutlines.Spec.Schema do
       max: Map.get(spec, :max),
       min_items: Map.get(spec, :min_items),
       max_items: Map.get(spec, :max_items),
-      unique_items: Map.get(spec, :unique_items, false)
+      unique_items: Map.get(spec, :unique_items, false),
+      pattern: pattern,
+      format: Map.get(spec, :format)
     }
   end
+
+  # Get built-in regex pattern for a format type
+  @doc false
+  def get_format_pattern(:email), do: @email_pattern
+  def get_format_pattern(:url), do: @url_pattern
+  def get_format_pattern(:uuid), do: @uuid_pattern
+  def get_format_pattern(:phone), do: @phone_pattern
+  def get_format_pattern(:date), do: @date_pattern
 
   defimpl ExOutlines.Spec do
     alias ExOutlines.{Diagnostics, Spec.Schema}
@@ -241,8 +280,27 @@ defmodule ExOutlines.Spec.Schema do
 
     # Private helpers
 
+    # Map internal formats to JSON Schema formats
+    defp to_json_schema_format(:email), do: "email"
+    defp to_json_schema_format(:url), do: "uri"
+    defp to_json_schema_format(:uuid), do: "uuid"
+    defp to_json_schema_format(:phone), do: "phone"
+    defp to_json_schema_format(:date), do: "date"
+
     defp field_to_json_schema(%{type: :string} = spec) do
       base = %{type: "string"}
+
+      base =
+        case Map.get(spec, :format) do
+          nil -> base
+          format -> Map.put(base, :format, to_json_schema_format(format))
+        end
+
+      base =
+        case Map.get(spec, :pattern) do
+          nil -> base
+          %Regex{source: source} -> Map.put(base, :pattern, source)
+        end
 
       base =
         case Map.get(spec, :min_length) do
@@ -733,49 +791,99 @@ defmodule ExOutlines.Spec.Schema do
 
     defp validate_string_constraints(name, spec, value) do
       errors = []
+      errors = errors ++ validate_format_constraint(name, spec, value)
+      errors = errors ++ validate_pattern_constraint(name, spec, value)
+      errors = errors ++ validate_min_length_constraint(name, spec, value)
+      errors = errors ++ validate_max_length_constraint(name, spec, value)
+      errors
+    end
+
+    defp validate_format_constraint(name, spec, value) do
+      case Map.get(spec, :format) do
+        nil ->
+          []
+
+        format ->
+          pattern = Schema.get_format_pattern(format)
+
+          if Regex.match?(pattern, value) do
+            []
+          else
+            [
+              %{
+                field: to_string(name),
+                expected: "string matching #{format} format",
+                got: value,
+                message: "Field '#{name}' must be a valid #{format}"
+              }
+            ]
+          end
+      end
+    end
+
+    defp validate_pattern_constraint(name, spec, value) do
+      case Map.get(spec, :pattern) do
+        nil ->
+          []
+
+        pattern ->
+          if Regex.match?(pattern, value) do
+            []
+          else
+            [
+              %{
+                field: to_string(name),
+                expected: "string matching pattern #{inspect(pattern)}",
+                got: value,
+                message: "Field '#{name}' must match pattern #{inspect(pattern)}"
+              }
+            ]
+          end
+      end
+    end
+
+    defp validate_min_length_constraint(name, spec, value) do
       length = String.length(value)
 
-      errors =
-        case Map.get(spec, :min_length) do
-          nil ->
-            errors
+      case Map.get(spec, :min_length) do
+        nil ->
+          []
 
-          min_length when length < min_length ->
-            [
-              %{
-                field: to_string(name),
-                expected: "string with at least #{min_length} characters",
-                got: value,
-                message: "Field '#{name}' must be at least #{min_length} characters"
-              }
-              | errors
-            ]
+        min_length when length < min_length ->
+          [
+            %{
+              field: to_string(name),
+              expected: "string with at least #{min_length} characters",
+              got: value,
+              message: "Field '#{name}' must be at least #{min_length} characters"
+            }
+          ]
 
-          _ ->
-            errors
-        end
+        _ ->
+          []
+      end
+    end
 
-      errors =
-        case Map.get(spec, :max_length) do
-          nil ->
-            errors
+    defp validate_max_length_constraint(name, spec, value) do
+      length = String.length(value)
 
-          max_length when length > max_length ->
-            [
-              %{
-                field: to_string(name),
-                expected: "string with at most #{max_length} characters",
-                got: value,
-                message: "Field '#{name}' must be at most #{max_length} characters"
-              }
-              | errors
-            ]
+      case Map.get(spec, :max_length) do
+        nil ->
+          []
 
-          _ ->
-            errors
-        end
+        max_length when length > max_length ->
+          [
+            %{
+              field: to_string(name),
+              expected: "string with at most #{max_length} characters",
+              got: value,
+              message: "Field '#{name}' must be at most #{max_length} characters"
+            }
+          ]
 
-      Enum.reverse(errors)
+        _ ->
+          []
+      end
     end
 
     defp validate_array_length(name, spec, value) do
