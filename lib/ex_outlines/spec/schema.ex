@@ -23,6 +23,9 @@ defmodule ExOutlines.Spec.Schema do
   - `max_length` - For strings, maximum length in characters (optional)
   - `min` - For integers/numbers, minimum value (optional)
   - `max` - For integers/numbers, maximum value (optional)
+  - `min_items` - For arrays, minimum number of items (optional)
+  - `max_items` - For arrays, maximum number of items (optional)
+  - `unique_items` - For arrays, whether items must be unique (default: false)
 
   ## Example
 
@@ -31,13 +34,14 @@ defmodule ExOutlines.Spec.Schema do
           name: %{type: :string, required: true, description: "User's full name"},
           age: %{type: :integer, required: true, positive: true},
           role: %{type: {:enum, ["admin", "user"]}, required: false},
-          active: %{type: :boolean, required: false}
+          active: %{type: :boolean, required: false},
+          tags: %{type: {:array, %{type: :string, max_length: 20}}, max_items: 10}
         }
       }
 
       # Valid input
-      ExOutlines.Spec.validate(schema, %{"name" => "Alice", "age" => 30})
-      # => {:ok, %{name: "Alice", age: 30}}
+      ExOutlines.Spec.validate(schema, %{"name" => "Alice", "age" => 30, "tags" => ["elixir"]})
+      # => {:ok, %{name: "Alice", age: 30, tags: ["elixir"]}}
 
       # Invalid input (missing required field)
       ExOutlines.Spec.validate(schema, %{"name" => "Bob"})
@@ -144,7 +148,10 @@ defmodule ExOutlines.Spec.Schema do
       min_length: Map.get(spec, :min_length),
       max_length: Map.get(spec, :max_length),
       min: Map.get(spec, :min),
-      max: Map.get(spec, :max)
+      max: Map.get(spec, :max),
+      min_items: Map.get(spec, :min_items),
+      max_items: Map.get(spec, :max_items),
+      unique_items: Map.get(spec, :unique_items, false)
     }
   end
 
@@ -273,6 +280,102 @@ defmodule ExOutlines.Spec.Schema do
     defp field_to_json_schema(%{type: {:enum, values}} = spec) do
       base = %{enum: values}
       add_description(base, spec)
+    end
+
+    defp field_to_json_schema(%{type: {:array, item_spec}} = spec) do
+      base = %{
+        type: "array",
+        items: item_spec_to_json_schema(item_spec)
+      }
+
+      base =
+        case Map.get(spec, :min_items) do
+          nil -> base
+          min_items -> Map.put(base, :minItems, min_items)
+        end
+
+      base =
+        case Map.get(spec, :max_items) do
+          nil -> base
+          max_items -> Map.put(base, :maxItems, max_items)
+        end
+
+      base =
+        if Map.get(spec, :unique_items, false) do
+          Map.put(base, :uniqueItems, true)
+        else
+          base
+        end
+
+      add_description(base, spec)
+    end
+
+    defp item_spec_to_json_schema(%{type: :string} = spec) do
+      base = %{type: "string"}
+
+      base =
+        case Map.get(spec, :min_length) do
+          nil -> base
+          min_length -> Map.put(base, :minLength, min_length)
+        end
+
+      base =
+        case Map.get(spec, :max_length) do
+          nil -> base
+          max_length -> Map.put(base, :maxLength, max_length)
+        end
+
+      base
+    end
+
+    defp item_spec_to_json_schema(%{type: :integer} = spec) do
+      base = %{type: "integer"}
+
+      {min_value, _} =
+        case {Map.get(spec, :min), Map.get(spec, :positive)} do
+          {nil, true} -> {1, true}
+          {min, _} -> {min, false}
+        end
+
+      base =
+        case min_value do
+          nil -> base
+          min -> Map.put(base, :minimum, min)
+        end
+
+      base =
+        case Map.get(spec, :max) do
+          nil -> base
+          max -> Map.put(base, :maximum, max)
+        end
+
+      base
+    end
+
+    defp item_spec_to_json_schema(%{type: :number} = spec) do
+      base = %{type: "number"}
+
+      base =
+        case Map.get(spec, :min) do
+          nil -> base
+          min -> Map.put(base, :minimum, min)
+        end
+
+      base =
+        case Map.get(spec, :max) do
+          nil -> base
+          max -> Map.put(base, :maximum, max)
+        end
+
+      base
+    end
+
+    defp item_spec_to_json_schema(%{type: :boolean}) do
+      %{type: "boolean"}
+    end
+
+    defp item_spec_to_json_schema(%{type: {:enum, values}}) do
+      %{enum: values}
     end
 
     defp add_description(schema, %{description: desc}) when is_binary(desc) do
@@ -410,6 +513,38 @@ defmodule ExOutlines.Spec.Schema do
           }
         ]
       end
+    end
+
+    defp validate_field_type(name, %{type: {:array, item_spec}} = spec, value)
+         when is_list(value) do
+      errors = []
+
+      # Validate array length constraints
+      errors = errors ++ validate_array_length(name, spec, value)
+
+      # Validate unique items constraint
+      errors = errors ++ validate_unique_items(name, spec, value)
+
+      # Validate each item
+      item_errors =
+        value
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {item, index} ->
+          validate_array_item(name, index, item_spec, item)
+        end)
+
+      errors ++ item_errors
+    end
+
+    defp validate_field_type(name, %{type: {:array, _}}, value) do
+      [
+        %{
+          field: to_string(name),
+          expected: "array",
+          got: value,
+          message: "Field '#{name}' must be an array"
+        }
+      ]
     end
 
     defp validate_integer_constraints(name, spec, value) do
@@ -556,6 +691,186 @@ defmodule ExOutlines.Spec.Schema do
         end
 
       Enum.reverse(errors)
+    end
+
+    defp validate_array_length(name, spec, value) do
+      errors = []
+      length = length(value)
+
+      errors =
+        case Map.get(spec, :min_items) do
+          nil ->
+            errors
+
+          min_items when length < min_items ->
+            [
+              %{
+                field: to_string(name),
+                expected: "array with at least #{min_items} items",
+                got: value,
+                message:
+                  "Field '#{name}' must have at least #{min_items} #{if min_items == 1, do: "item", else: "items"}"
+              }
+              | errors
+            ]
+
+          _ ->
+            errors
+        end
+
+      errors =
+        case Map.get(spec, :max_items) do
+          nil ->
+            errors
+
+          max_items when length > max_items ->
+            [
+              %{
+                field: to_string(name),
+                expected: "array with at most #{max_items} items",
+                got: value,
+                message:
+                  "Field '#{name}' must have at most #{max_items} #{if max_items == 1, do: "item", else: "items"}"
+              }
+              | errors
+            ]
+
+          _ ->
+            errors
+        end
+
+      errors
+    end
+
+    defp validate_unique_items(name, spec, value) do
+      unique_required = Map.get(spec, :unique_items, false)
+
+      if unique_required and length(value) != length(Enum.uniq(value)) do
+        # Find the first duplicate
+        duplicate = find_first_duplicate(value)
+
+        [
+          %{
+            field: to_string(name),
+            expected: "array with unique items",
+            got: value,
+            message: "Field '#{name}' must have unique items (duplicate: #{inspect(duplicate)})"
+          }
+        ]
+      else
+        []
+      end
+    end
+
+    defp find_first_duplicate(list) do
+      list
+      |> Enum.reduce_while({MapSet.new(), nil}, fn item, {seen, _} ->
+        if MapSet.member?(seen, item) do
+          {:halt, {seen, item}}
+        else
+          {:cont, {MapSet.put(seen, item), nil}}
+        end
+      end)
+      |> elem(1)
+    end
+
+    defp validate_array_item(array_name, index, item_spec, item) do
+      # Create a temporary field name with index for error messages
+      field_name = "#{array_name}[#{index}]"
+
+      # Validate the item using the item_spec
+      case Map.get(item_spec, :type) do
+        :string ->
+          validate_string_item(field_name, item_spec, item)
+
+        :integer ->
+          validate_integer_item(field_name, item_spec, item)
+
+        :number ->
+          validate_number_item(field_name, item_spec, item)
+
+        :boolean ->
+          validate_boolean_item(field_name, item)
+
+        {:enum, allowed_values} ->
+          validate_enum_item(field_name, allowed_values, item)
+
+        _ ->
+          []
+      end
+    end
+
+    defp validate_string_item(field_name, item_spec, item) when is_binary(item) do
+      validate_string_constraints(field_name, item_spec, item)
+    end
+
+    defp validate_string_item(field_name, _item_spec, item) do
+      [
+        %{
+          field: field_name,
+          expected: "string",
+          got: item,
+          message: "Field '#{field_name}' must be a string"
+        }
+      ]
+    end
+
+    defp validate_integer_item(field_name, item_spec, item) when is_integer(item) do
+      validate_integer_constraints(field_name, item_spec, item)
+    end
+
+    defp validate_integer_item(field_name, _item_spec, item) do
+      [
+        %{
+          field: field_name,
+          expected: "integer",
+          got: item,
+          message: "Field '#{field_name}' must be an integer"
+        }
+      ]
+    end
+
+    defp validate_number_item(field_name, item_spec, item) when is_number(item) do
+      validate_number_constraints(field_name, item_spec, item)
+    end
+
+    defp validate_number_item(field_name, _item_spec, item) do
+      [
+        %{
+          field: field_name,
+          expected: "number",
+          got: item,
+          message: "Field '#{field_name}' must be a number"
+        }
+      ]
+    end
+
+    defp validate_boolean_item(_field_name, item) when is_boolean(item), do: []
+
+    defp validate_boolean_item(field_name, item) do
+      [
+        %{
+          field: field_name,
+          expected: "boolean",
+          got: item,
+          message: "Field '#{field_name}' must be a boolean"
+        }
+      ]
+    end
+
+    defp validate_enum_item(field_name, allowed_values, item) do
+      if item in allowed_values do
+        []
+      else
+        [
+          %{
+            field: field_name,
+            expected: "one of #{inspect(allowed_values)}",
+            got: item,
+            message: "Field '#{field_name}' must be one of: #{inspect(allowed_values)}"
+          }
+        ]
+      end
     end
   end
 end

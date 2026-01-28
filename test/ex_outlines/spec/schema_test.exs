@@ -907,4 +907,277 @@ defmodule ExOutlines.Spec.SchemaTest do
       refute Map.has_key?(ratio_schema, :maximum)
     end
   end
+
+  describe "array validation" do
+    test "validates array of strings" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, required: true}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"tags" => ["elixir", "phoenix"]})
+      assert result.tags == ["elixir", "phoenix"]
+    end
+
+    test "validates empty array" do
+      schema = Schema.new(%{tags: %{type: {:array, %{type: :string}}}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"tags" => []})
+      assert result.tags == []
+    end
+
+    test "validates array of integers" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"scores" => [1, 2, 3, 100]})
+      assert result.scores == [1, 2, 3, 100]
+    end
+
+    test "rejects non-array value" do
+      schema = Schema.new(%{tags: %{type: {:array, %{type: :string}}}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"tags" => "not-an-array"})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "must be an array"
+    end
+
+    test "validates min_items constraint" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, min_items: 1}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two"]})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"tags" => []})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "at least 1 item"
+    end
+
+    test "validates max_items constraint" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, max_items: 3}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two", "three"]})
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"tags" => ["one", "two", "three", "four"]})
+
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "at most 3 items"
+    end
+
+    test "validates item count range (min and max)" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, min_items: 2, max_items: 5}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["one", "two", "three"]})
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["a", "b", "c", "d", "e"]})
+
+      # Too few
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["one"]})
+      assert hd(diag.errors).message =~ "at least 2 items"
+
+      # Too many
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["a", "b", "c", "d", "e", "f"]})
+      assert hd(diag.errors).message =~ "at most 5 items"
+    end
+
+    test "validates unique_items constraint" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, unique_items: true}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["a", "b", "c"]})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"tags" => ["a", "b", "a"]})
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "tags"
+      assert error.message =~ "unique items"
+      assert error.message =~ "duplicate"
+    end
+
+    test "validates item types" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer}}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"scores" => [1, "two", 3]})
+
+      assert length(diag.errors) == 1
+      error = hd(diag.errors)
+      assert error.field == "scores[1]"
+      assert error.message =~ "must be an integer"
+    end
+
+    test "validates item constraints (string length)" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string, min_length: 2, max_length: 10}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"tags" => ["ab", "hello", "1234567890"]})
+
+      # Item too short
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["a", "hello"]})
+      error = hd(diag.errors)
+      assert error.field == "tags[0]"
+      assert error.message =~ "at least 2 characters"
+
+      # Item too long
+      assert {:error, diag} = Spec.validate(schema, %{"tags" => ["hello", "12345678901"]})
+      error = hd(diag.errors)
+      assert error.field == "tags[1]"
+      assert error.message =~ "at most 10 characters"
+    end
+
+    test "validates item constraints (integer range)" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, min: 0, max: 100}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"scores" => [0, 50, 100]})
+
+      # Item below minimum
+      assert {:error, diag} = Spec.validate(schema, %{"scores" => [50, -1, 75]})
+      error = hd(diag.errors)
+      assert error.field == "scores[1]"
+      assert error.message =~ "at least 0"
+
+      # Item above maximum
+      assert {:error, diag} = Spec.validate(schema, %{"scores" => [50, 101, 75]})
+      error = hd(diag.errors)
+      assert error.field == "scores[1]"
+      assert error.message =~ "at most 100"
+    end
+
+    test "validates multiple invalid items (collects all errors)" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, min: 0, max: 100}}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"scores" => [-1, 50, 150]})
+
+      assert length(diag.errors) == 2
+      assert Enum.any?(diag.errors, fn e -> e.field == "scores[0]" end)
+      assert Enum.any?(diag.errors, fn e -> e.field == "scores[2]" end)
+    end
+
+    test "validates array of enums" do
+      schema =
+        Schema.new(%{
+          categories: %{type: {:array, %{type: {:enum, ["tech", "business", "health"]}}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"categories" => ["tech", "business"]})
+
+      assert {:error, diag} = Spec.validate(schema, %{"categories" => ["tech", "invalid"]})
+      error = hd(diag.errors)
+      assert error.field == "categories[1]"
+      assert error.message =~ "must be one of"
+    end
+
+    test "validates array of booleans" do
+      schema =
+        Schema.new(%{
+          flags: %{type: {:array, %{type: :boolean}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"flags" => [true, false, true]})
+      assert result.flags == [true, false, true]
+
+      assert {:error, diag} = Spec.validate(schema, %{"flags" => [true, "not-bool"]})
+      error = hd(diag.errors)
+      assert error.field == "flags[1]"
+      assert error.message =~ "must be a boolean"
+    end
+
+    test "validates array of numbers (floats)" do
+      schema =
+        Schema.new(%{
+          values: %{type: {:array, %{type: :number, min: 0.0, max: 1.0}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"values" => [0.0, 0.5, 1.0]})
+
+      assert {:error, diag} = Spec.validate(schema, %{"values" => [0.5, 1.5]})
+      error = hd(diag.errors)
+      assert error.field == "values[1]"
+      assert error.message =~ "at most 1.0"
+    end
+
+    test "JSON Schema generation for arrays" do
+      schema =
+        Schema.new(%{
+          tags: %{
+            type: {:array, %{type: :string, min_length: 2, max_length: 20}},
+            min_items: 1,
+            max_items: 10,
+            unique_items: true
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      array_schema = json_schema.properties.tags
+
+      assert array_schema[:type] == "array"
+      assert array_schema[:minItems] == 1
+      assert array_schema[:maxItems] == 10
+      assert array_schema[:uniqueItems] == true
+
+      items = array_schema[:items]
+      assert items[:type] == "string"
+      assert items[:minLength] == 2
+      assert items[:maxLength] == 20
+    end
+
+    test "JSON Schema generation for integer array" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, min: 0, max: 100}}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      array_schema = json_schema.properties.scores
+
+      assert array_schema[:type] == "array"
+      items = array_schema[:items]
+      assert items[:type] == "integer"
+      assert items[:minimum] == 0
+      assert items[:maximum] == 100
+    end
+
+    test "optional array field (not provided)" do
+      schema =
+        Schema.new(%{
+          tags: %{type: {:array, %{type: :string}}, required: false}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{})
+      refute Map.has_key?(result, :tags)
+    end
+  end
 end
