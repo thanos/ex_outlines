@@ -420,21 +420,21 @@ Some steps add:
 | Step | Status | Tests | Notes |
 |------|--------|-------|-------|
 | 1. String Length | ✅ Complete | 211 | min_length, max_length working |
-| 2. Integer Min/Max | 🔄 In Progress | TBD | Implementing now |
-| 3. Array Validation | ⏳ Pending | - | - |
-| 4. Nested Objects | ⏳ Pending | - | - |
-| 5. Regex Patterns | ⏳ Pending | - | - |
-| 6. Union Types | ⏳ Pending | - | - |
-| 7. E-commerce Example | ⏳ Pending | - | - |
-| 8. Support Triage Example | ⏳ Pending | - | - |
-| 9. Document Extraction Example | ⏳ Pending | - | - |
-| 10. Getting Started Livebook | ⏳ Pending | - | - |
-| 11. Advanced Patterns Livebook | ⏳ Pending | - | - |
-| 12. Anthropic Backend | ⏳ Pending | - | - |
+| 2. Integer Min/Max | ✅ Complete | 229 | min/max for integers and numbers |
+| 3. Array Validation | ✅ Complete | 249 | Arrays with item validation |
+| 4. Nested Objects | ✅ Complete | 262 | Recursive validation with paths |
+| 5. Regex Patterns | ✅ Complete | 211 | Pattern and format validation |
+| 6. Union Types | ✅ Complete | 223 | Union and null type support |
+| 7. E-commerce Example | ✅ Complete | 223 | Product categorization example |
+| 8. Support Triage Example | ✅ Complete | 223 | Ticket triage and routing |
+| 9. Document Extraction Example | ✅ Complete | 223 | Bibliographic metadata extraction |
+| 10. Getting Started Livebook | ✅ Complete | 223 | Interactive tutorial notebook |
+| 11. Advanced Patterns Livebook | ✅ Complete | 223 | Advanced features notebook |
+| 12. Anthropic Backend | ✅ Complete | 243 | Native Anthropic Claude API backend |
 | 13. Batch Processing | ⏳ Pending | - | - |
 | 14. How-To Guides | ⏳ Pending | - | - |
 | 15. Benchmarks | ⏳ Pending | - | - |
 
 ---
 
-**Last Updated:** 2026-01-27
+**Last Updated:** 2026-01-28
