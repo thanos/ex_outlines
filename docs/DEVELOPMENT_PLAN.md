@@ -429,7 +429,7 @@ Some steps add:
 | 8. Support Triage Example | ✅ Complete | 223 | Ticket triage and routing |
 | 9. Document Extraction Example | ✅ Complete | 223 | Bibliographic metadata extraction |
 | 10. Getting Started Livebook | ✅ Complete | 223 | Interactive tutorial notebook |
-| 11. Advanced Patterns Livebook | ⏳ Pending | - | - |
+| 11. Advanced Patterns Livebook | ✅ Complete | 223 | Advanced features notebook |
 | 12. Anthropic Backend | ⏳ Pending | - | - |
 | 13. Batch Processing | ⏳ Pending | - | - |
 | 14. How-To Guides | ⏳ Pending | - | - |
