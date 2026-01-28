@@ -420,9 +420,9 @@ Some steps add:
 | Step | Status | Tests | Notes |
 |------|--------|-------|-------|
 | 1. String Length | ✅ Complete | 211 | min_length, max_length working |
-| 2. Integer Min/Max | 🔄 In Progress | TBD | Implementing now |
-| 3. Array Validation | ⏳ Pending | - | - |
-| 4. Nested Objects | ⏳ Pending | - | - |
+| 2. Integer Min/Max | ✅ Complete | 229 | min/max for integers and numbers |
+| 3. Array Validation | ✅ Complete | 249 | Arrays with item validation |
+| 4. Nested Objects | ✅ Complete | 262 | Recursive validation with paths |
 | 5. Regex Patterns | ⏳ Pending | - | - |
 | 6. Union Types | ⏳ Pending | - | - |
 | 7. E-commerce Example | ⏳ Pending | - | - |
