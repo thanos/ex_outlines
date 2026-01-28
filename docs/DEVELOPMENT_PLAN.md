@@ -424,7 +424,7 @@ Some steps add:
 | 3. Array Validation | ✅ Complete | 249 | Arrays with item validation |
 | 4. Nested Objects | ✅ Complete | 262 | Recursive validation with paths |
 | 5. Regex Patterns | ✅ Complete | 211 | Pattern and format validation |
-| 6. Union Types | ⏳ Pending | - | - |
+| 6. Union Types | ✅ Complete | 223 | Union and null type support |
 | 7. E-commerce Example | ⏳ Pending | - | - |
 | 8. Support Triage Example | ⏳ Pending | - | - |
 | 9. Document Extraction Example | ⏳ Pending | - | - |
