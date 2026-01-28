@@ -8,7 +8,7 @@ Mix.install([
 
 ## Introduction
 
-Welcome to **Advanced Patterns**! 🚀
+Welcome to **Advanced Patterns**!
 
 This notebook covers advanced ExOutlines features for building production-ready, complex schemas. You should be comfortable with basic schemas before diving into this material.
 
@@ -16,10 +16,10 @@ This notebook covers advanced ExOutlines features for building production-ready,
 
 Before starting, you should understand:
 
-* ✅ Basic schema creation and validation
-* ✅ Field constraints (lengths, ranges)
-* ✅ Enums and arrays
-* ✅ The retry-repair loop
+* Basic schema creation and validation
+* Field constraints (lengths, ranges)
+* Enums and arrays
+* The retry-repair loop
 
 If you need a refresher, check out the **Getting Started** livebook first!
 
@@ -32,7 +32,7 @@ If you need a refresher, check out the **Getting Started** livebook first!
 * ⚡ **Performance**: Optimization tips and best practices
 * 🔧 **Error Handling**: Sophisticated retry and recovery strategies
 
-Let's dive into advanced territory! 💪
+Let's dive into advanced territory!
 
 ## Nested Objects
 
@@ -56,7 +56,7 @@ user_schema = Schema.new(%{
   address: %{type: {:object, address_schema}, required: true}
 })
 
-IO.puts("✅ User schema with nested address created!")
+IO.puts("User schema with nested address created!")
 ```
 
 Now let's validate nested data:
@@ -76,7 +76,7 @@ valid_user = %{
 
 case Spec.validate(user_schema, valid_user) do
   {:ok, validated} ->
-    IO.puts("✅ Validation successful!")
+    IO.puts("Validation successful!")
     IO.puts("\nUser: #{validated.name}")
     IO.puts("Email: #{validated.email}")
     IO.puts("Address: #{validated.address.street}, #{validated.address.city}, #{validated.address.state} #{validated.address.zip_code}")
@@ -107,7 +107,7 @@ invalid_user = %{
 
 case Spec.validate(user_schema, invalid_user) do
   {:ok, _} ->
-    IO.puts("✅ Valid")
+    IO.puts("Valid")
 
   {:error, diagnostics} ->
     IO.puts("❌ Validation errors with full paths:\n")
@@ -165,7 +165,7 @@ company = %{
 
 case Spec.validate(company_schema, company) do
   {:ok, validated} ->
-    IO.puts("✅ Company validated!")
+    IO.puts("Company validated!")
     IO.puts("Name: #{validated.name}")
     IO.puts("HQ: #{validated.headquarters.name}")
     IO.puts("City: #{validated.headquarters.address.city}")
@@ -176,7 +176,7 @@ case Spec.validate(company_schema, company) do
 end
 ```
 
-### 💡 Key Insight: Composition
+### Key Insight: Composition
 
 Build complex schemas by **composing** smaller, reusable schemas. This makes code maintainable and testable.
 
@@ -224,7 +224,7 @@ paper = %{
 
 case Spec.validate(paper_schema, paper) do
   {:ok, validated} ->
-    IO.puts("✅ Paper validated!")
+    IO.puts("Paper validated!")
     IO.puts("Title: #{validated.title}")
     IO.puts("Authors:")
 
@@ -237,7 +237,7 @@ case Spec.validate(paper_schema, paper) do
 end
 ```
 
-### 🎯 Exercise: Add Invalid Author
+### Exercise: Add Invalid Author
 
 Try adding an author with an invalid email to the `authors` array. What error message do you get? Does it include the array index?
 
@@ -279,7 +279,7 @@ IO.puts("\nBoolean ID (invalid):")
 IO.puts("Error: #{hd(diag.errors).message}")
 ```
 
-### 🔀 When to Use Union Types
+### When to Use Union Types
 
 Union types are perfect for:
 
@@ -335,7 +335,7 @@ IO.puts("\nComplete profile:")
 IO.inspect(val)
 ```
 
-### 📝 Union vs Required: false
+### Union vs Required: false
 
 **What's the difference?**
 
@@ -393,7 +393,7 @@ person = %{
 
 case Spec.validate(person_schema, person) do
   {:ok, validated} ->
-    IO.puts("✅ Complex validation successful!")
+    IO.puts("Complex validation successful!")
     IO.puts("Name: #{validated.name}")
     IO.puts("Primary: #{validated.primary_contact.number}")
     IO.puts("Secondary: #{hd(validated.secondary_contacts).address}")
@@ -403,7 +403,7 @@ case Spec.validate(person_schema, person) do
 end
 ```
 
-### 🏗️ Design Pattern: Type Discriminators
+### Design Pattern: Type Discriminators
 
 When using unions of objects, consider adding a `type` field to distinguish them. This makes the LLM's job easier!
 
@@ -434,7 +434,7 @@ defmodule ProductionValidator do
   end
 
   defp log_validation_errors(diagnostics) do
-    IO.puts("⚠️  Validation failed with #{length(diagnostics.errors)} errors:")
+    IO.puts("Validation failed with #{length(diagnostics.errors)} errors:")
 
     Enum.each(diagnostics.errors, fn error ->
       IO.puts("  • Field: #{error.field || "unknown"}")
@@ -454,7 +454,7 @@ IO.puts("\nResult with fallback:")
 IO.inspect(result)
 ```
 
-### 🛡️ Production Best Practices
+### Production Best Practices
 
 1. **Log all validation failures** for monitoring
 2. **Provide fallbacks** for non-critical data
@@ -484,7 +484,7 @@ defmodule RetryStrategies do
 
       {:error, reason} when attempt < max_attempts ->
         wait_time = :math.pow(2, attempt - 1) |> trunc()
-        IO.puts("⏳ Retry #{attempt}/#{max_attempts} after #{wait_time}s...")
+        IO.puts("Retry #{attempt}/#{max_attempts} after #{wait_time}s...")
         Process.sleep(wait_time * 1000)
         attempt_with_backoff(func, attempt + 1, max_attempts)
 
@@ -503,7 +503,7 @@ defmodule RetryStrategies do
     prompts = [base_prompt | variations]
 
     Enum.reduce_while(prompts, {:error, :no_prompts}, fn prompt, _acc ->
-      IO.puts("🔄 Trying prompt variation...")
+      IO.puts("Trying prompt variation...")
 
       # Simulate LLM call
       case simulate_llm_call(prompt) do
@@ -531,7 +531,7 @@ RetryStrategies.with_exponential_backoff(fn ->
 end)
 ```
 
-### ⚡ Performance Tip
+### Performance Tip
 
 Exponential backoff prevents overwhelming the LLM API during high load. Use it for production systems!
 
@@ -581,7 +581,7 @@ defmodule SchemaLibrary do
   end
 end
 
-IO.puts("✅ Schema library created!")
+IO.puts("Schema library created!")
 IO.puts("\nReusable schemas:")
 IO.puts("  • address_schema")
 IO.puts("  • contact_schema")
@@ -589,7 +589,7 @@ IO.puts("  • customer_schema (composed)")
 IO.puts("  • business_schema (composed)")
 ```
 
-### 📚 Benefits of Composition
+### Benefits of Composition
 
 1. **DRY**: Don't repeat schema definitions
 2. **Consistency**: Same validation rules everywhere
@@ -633,7 +633,7 @@ end
   "validation-logger",
   [:ex_outlines, :validation, :complete],
   fn _event, measurements, metadata, _config ->
-    status = if metadata.success, do: "✅", else: "❌"
+    status = if metadata.success, do: "x", else: " "
 
     IO.puts(
       "#{status} Validation completed in #{measurements.duration}µs (errors: #{metadata.error_count})"
@@ -652,7 +652,7 @@ IO.puts("\nInvalid data:")
 TelemetryValidator.validate_with_metrics(schema, %{"name" => 123})
 ```
 
-### 📊 What to Monitor
+### What to Monitor
 
 * **Validation success rate**: Track failures over time
 * **Validation duration**: Detect performance issues
@@ -677,7 +677,7 @@ defmodule PerformanceDemo do
   end
 
   @doc """
-  ✅ GOOD: Reuse compiled schema
+  GOOD: Reuse compiled schema
   """
   def validate_fast(data, schema) do
     # Schema passed in, created once
@@ -685,7 +685,7 @@ defmodule PerformanceDemo do
   end
 
   @doc """
-  ✅ BEST: Module attribute (compile-time)
+  BEST: Module attribute (compile-time)
   """
   @user_schema Schema.new(%{name: %{type: :string, required: true}})
 
@@ -717,7 +717,7 @@ IO.puts(
 )
 ```
 
-### ⚡ Performance Best Practices
+### Performance Best Practices
 
 1. **Create schemas once**: Store in module attributes or application state
 2. **Batch validations**: Validate multiple items together when possible
@@ -797,53 +797,53 @@ defmodule MyAppWeb.UserController do
   end
 end
 
-IO.puts("✅ Phoenix controller pattern demonstrated!")
+IO.puts("Phoenix controller pattern demonstrated!")
 ```
 
-### 🏭 Production Checklist
+### Production Checklist
 
 Before deploying ExOutlines to production:
 
-* ☑️ Define schemas as module attributes
-* ☑️ Add telemetry for monitoring
-* ☑️ Implement retry strategies with backoff
-* ☑️ Log validation failures for debugging
-* ☑️ Version your schemas for compatibility
-* ☑️ Add circuit breakers for LLM failures
-* ☑️ Cache JSON schemas when possible
-* ☑️ Test with real LLM outputs
-* ☑️ Set up alerting for high failure rates
-* ☑️ Document expected schemas for your team
+* Define schemas as module attributes
+* Add telemetry for monitoring
+* Implement retry strategies with backoff
+* Log validation failures for debugging
+* Version your schemas for compatibility
+* Add circuit breakers for LLM failures
+* Cache JSON schemas when possible
+* Test with real LLM outputs
+* Set up alerting for high failure rates
+* Document expected schemas for your team
 
 ## Key Takeaways
 
-Congratulations! 🎉 You've mastered advanced ExOutlines patterns:
+Congratulations! You've mastered advanced ExOutlines patterns:
 
 ### Structures
-* 🏗️ **Nested Objects**: Multi-level hierarchical data
-* 🔀 **Union Types**: Flexible fields accepting multiple types
-* 📦 **Arrays of Objects**: Complex collections
-* 🎯 **Nullable Fields**: Proper null handling with unions
+* **Nested Objects**: Multi-level hierarchical data
+* **Union Types**: Flexible fields accepting multiple types
+* **Arrays of Objects**: Complex collections
+* **Nullable Fields**: Proper null handling with unions
 
 ### Patterns
-* 📚 **Schema Composition**: Reusable, maintainable schemas
-* 🛡️ **Error Handling**: Production-grade validation
-* ⚡ **Performance**: Optimization strategies
-* 📊 **Telemetry**: Monitoring and observability
+* **Schema Composition**: Reusable, maintainable schemas
+* **Error Handling**: Production-grade validation
+* **Performance**: Optimization strategies
+* **Telemetry**: Monitoring and observability
 
 ### Production
-* 🏭 **Phoenix Integration**: Real-world API patterns
-* 🔄 **Retry Strategies**: Exponential backoff, prompt variations
-* ✅ **Best Practices**: Checklist for production readiness
+* **Phoenix Integration**: Real-world API patterns
+* **Retry Strategies**: Exponential backoff, prompt variations
+* **Best Practices**: Checklist for production readiness
 
-### 📚 Next Steps
+### Next Steps
 
 * **Examples**: Check `examples/` for complete production use cases
 * **Documentation**: Full API docs at hexdocs.pm
 * **Community**: Share your patterns and learn from others
 
-### 🚀 You're Ready!
+### You're Ready!
 
 You now have everything you need to build sophisticated, production-ready LLM integrations with ExOutlines!
 
-Happy building! 💪
+Happy building!
