@@ -363,5 +363,229 @@ if Code.ensure_loaded?(Ecto) do
         assert {:ok, %{count: 50}} = result
       end
     end
+
+    describe "from_ecto_schema/2" do
+      # Define test schemas
+      defmodule SimpleUser do
+        use Elixir.Ecto.Schema
+
+        schema "users" do
+          field(:email, :string)
+          field(:age, :integer)
+          field(:active, :boolean)
+        end
+      end
+
+      defmodule UserWithValidations do
+        use Elixir.Ecto.Schema
+        import Elixir.Ecto.Changeset
+
+        schema "users" do
+          field(:email, :string)
+          field(:username, :string)
+          field(:age, :integer)
+          field(:bio, :string)
+        end
+
+        def changeset(user, params) do
+          user
+          |> cast(params, [:email, :username, :age, :bio])
+          |> validate_required([:email, :username])
+          |> validate_format(:email, ~r/@/)
+          |> validate_length(:username, min: 3, max: 20)
+          |> validate_number(:age, greater_than: 0, less_than: 150)
+          |> validate_length(:bio, max: 500)
+        end
+      end
+
+      defmodule UserWithEnum do
+        use Elixir.Ecto.Schema
+
+        schema "users" do
+          field(:role, Elixir.Ecto.Enum, values: [:admin, :user, :guest])
+          field(:status, Elixir.Ecto.Enum, values: [:active, :inactive, :banned])
+        end
+      end
+
+      defmodule UserWithEmbeds do
+        use Elixir.Ecto.Schema
+
+        defmodule Address do
+          use Elixir.Ecto.Schema
+
+          embedded_schema do
+            field(:street, :string)
+            field(:city, :string)
+            field(:zip, :string)
+          end
+        end
+
+        schema "users" do
+          field(:name, :string)
+          embeds_one(:address, Address)
+        end
+      end
+
+      defmodule UserWithArrays do
+        use Elixir.Ecto.Schema
+
+        schema "users" do
+          field(:tags, {:array, :string})
+          field(:scores, {:array, :integer})
+        end
+      end
+
+      test "converts simple Ecto schema to ExOutlines schema" do
+        schema = Ecto.from_ecto_schema(SimpleUser)
+
+        assert Map.has_key?(schema.fields, :email)
+        assert Map.has_key?(schema.fields, :age)
+        assert Map.has_key?(schema.fields, :active)
+
+        assert schema.fields.email.type == :string
+        assert schema.fields.age.type == :integer
+        assert schema.fields.active.type == :boolean
+      end
+
+      test "extracts validation rules from changeset" do
+        schema = Ecto.from_ecto_schema(UserWithValidations)
+
+        # Required fields
+        assert schema.fields.email.required == true
+        assert schema.fields.username.required == true
+        assert schema.fields.age.required == false
+        assert schema.fields.bio.required == false
+
+        # Length constraints
+        assert schema.fields.username.min_length == 3
+        assert schema.fields.username.max_length == 20
+        assert schema.fields.bio.max_length == 500
+
+        # Number constraints
+        assert schema.fields.age.min == 1
+        assert schema.fields.age.max == 149
+
+        # Format constraints
+        assert match?(%Regex{}, schema.fields.email.pattern)
+        assert Regex.match?(schema.fields.email.pattern, "test@example.com")
+      end
+
+      test "handles explicit required fields option" do
+        schema = Ecto.from_ecto_schema(SimpleUser, required: [:email, :age])
+
+        assert schema.fields.email.required == true
+        assert schema.fields.age.required == true
+        assert schema.fields.active.required == false
+      end
+
+      test "handles field descriptions" do
+        descriptions = %{
+          email: "User's email address",
+          age: "User's age in years"
+        }
+
+        schema = Ecto.from_ecto_schema(SimpleUser, descriptions: descriptions)
+
+        assert schema.fields.email.description == "User's email address"
+        assert schema.fields.age.description == "User's age in years"
+        assert schema.fields.active.description == nil
+      end
+
+      test "converts Ecto.Enum to enum type" do
+        schema = Ecto.from_ecto_schema(UserWithEnum)
+
+        assert schema.fields.role.type == {:enum, [:admin, :user, :guest]}
+        assert schema.fields.status.type == {:enum, [:active, :inactive, :banned]}
+      end
+
+      test "converts embedded schemas to nested objects" do
+        schema = Ecto.from_ecto_schema(UserWithEmbeds)
+
+        assert schema.fields.name.type == :string
+        assert match?({:object, %Schema{}}, schema.fields.address.type)
+
+        {:object, address_schema} = schema.fields.address.type
+        assert Map.has_key?(address_schema.fields, :street)
+        assert Map.has_key?(address_schema.fields, :city)
+        assert Map.has_key?(address_schema.fields, :zip)
+      end
+
+      test "converts array fields to array type" do
+        schema = Ecto.from_ecto_schema(UserWithArrays)
+
+        assert match?({:array, %{type: :string}}, schema.fields.tags.type)
+        assert match?({:array, %{type: :integer}}, schema.fields.scores.type)
+      end
+
+      test "excludes :id field" do
+        schema = Ecto.from_ecto_schema(SimpleUser)
+
+        refute Map.has_key?(schema.fields, :id)
+      end
+
+      test "handles custom changeset function name" do
+        defmodule UserWithCustomChangeset do
+          use Elixir.Ecto.Schema
+          import Elixir.Ecto.Changeset
+
+          schema "users" do
+            field(:email, :string)
+            field(:password, :string)
+          end
+
+          def registration_changeset(user, params) do
+            user
+            |> cast(params, [:email, :password])
+            |> validate_required([:email, :password])
+            |> validate_length(:password, min: 8)
+          end
+        end
+
+        schema = Ecto.from_ecto_schema(UserWithCustomChangeset, changeset: :registration_changeset)
+
+        assert schema.fields.email.required == true
+        assert schema.fields.password.required == true
+        assert schema.fields.password.min_length == 8
+      end
+
+      test "raises error for non-Ecto schema" do
+        defmodule NotAnEctoSchema do
+          defstruct [:name]
+        end
+
+        assert_raise ArgumentError, ~r/is not an Ecto schema/, fn ->
+          Ecto.from_ecto_schema(NotAnEctoSchema)
+        end
+      end
+
+      test "validates converted schema with data" do
+        schema = Ecto.from_ecto_schema(UserWithValidations)
+
+        valid_data = %{
+          "email" => "alice@example.com",
+          "username" => "alice",
+          "age" => 30,
+          "bio" => "Software engineer"
+        }
+
+        assert {:ok, result} = ExOutlines.Spec.validate(schema, valid_data)
+        assert result.email == "alice@example.com"
+        assert result.username == "alice"
+        assert result.age == 30
+      end
+
+      test "validates and catches errors with converted schema" do
+        schema = Ecto.from_ecto_schema(UserWithValidations)
+
+        invalid_data = %{
+          "email" => "invalid-email",
+          "username" => "ab",
+          "age" => 200
+        }
+
+        assert {:error, diagnostics} = ExOutlines.Spec.validate(schema, invalid_data)
+        assert length(diagnostics.errors) > 0
+      end
+    end
   end
 end
