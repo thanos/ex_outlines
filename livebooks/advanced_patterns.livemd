@@ -1,0 +1,849 @@
+# Advanced Patterns with ExOutlines
+
+```elixir
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"}
+])
+```
+
+## Introduction
+
+Welcome to **Advanced Patterns**! 🚀
+
+This notebook covers advanced ExOutlines features for building production-ready, complex schemas. You should be comfortable with basic schemas before diving into this material.
+
+### Prerequisites
+
+Before starting, you should understand:
+
+* ✅ Basic schema creation and validation
+* ✅ Field constraints (lengths, ranges)
+* ✅ Enums and arrays
+* ✅ The retry-repair loop
+
+If you need a refresher, check out the **Getting Started** livebook first!
+
+### What You'll Learn
+
+* 🏗️ **Nested Objects**: Complex hierarchical data structures
+* 🔀 **Union Types**: Fields that accept multiple types
+* 🎯 **Advanced Validation**: Complex constraints and patterns
+* 🏭 **Production Patterns**: Real-world integration strategies
+* ⚡ **Performance**: Optimization tips and best practices
+* 🔧 **Error Handling**: Sophisticated retry and recovery strategies
+
+Let's dive into advanced territory! 💪
+
+## Nested Objects
+
+Nested objects allow you to build hierarchical data structures:
+
+```elixir
+alias ExOutlines.{Spec, Spec.Schema}
+
+# Define nested address schema
+address_schema = Schema.new(%{
+  street: %{type: :string, required: true, min_length: 5},
+  city: %{type: :string, required: true, min_length: 2},
+  state: %{type: :string, required: true, pattern: ~r/^[A-Z]{2}$/},
+  zip_code: %{type: :string, required: true, pattern: ~r/^\d{5}(-\d{4})?$/}
+})
+
+# User schema with nested address
+user_schema = Schema.new(%{
+  name: %{type: :string, required: true, min_length: 2},
+  email: %{type: :string, required: true, format: :email},
+  address: %{type: {:object, address_schema}, required: true}
+})
+
+IO.puts("✅ User schema with nested address created!")
+```
+
+Now let's validate nested data:
+
+```elixir
+# Valid nested data
+valid_user = %{
+  "name" => "Alice Johnson",
+  "email" => "alice@example.com",
+  "address" => %{
+    "street" => "123 Main Street",
+    "city" => "San Francisco",
+    "state" => "CA",
+    "zip_code" => "94102"
+  }
+}
+
+case Spec.validate(user_schema, valid_user) do
+  {:ok, validated} ->
+    IO.puts("✅ Validation successful!")
+    IO.puts("\nUser: #{validated.name}")
+    IO.puts("Email: #{validated.email}")
+    IO.puts("Address: #{validated.address.street}, #{validated.address.city}, #{validated.address.state} #{validated.address.zip_code}")
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Validation failed:")
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+### 🔍 Error Path Tracking
+
+When nested validation fails, errors include the full path:
+
+```elixir
+# Invalid nested data - bad zip code
+invalid_user = %{
+  "name" => "Bob Smith",
+  "email" => "bob@example.com",
+  "address" => %{
+    "street" => "456 Oak Ave",
+    "city" => "Austin",
+    "state" => "TX",
+    "zip_code" => "123"
+    # Invalid - needs 5 digits
+  }
+}
+
+case Spec.validate(user_schema, invalid_user) do
+  {:ok, _} ->
+    IO.puts("✅ Valid")
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Validation errors with full paths:\n")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  • Field: #{error.field}")
+      IO.puts("    Message: #{error.message}\n")
+    end)
+end
+```
+
+Notice the error field is `"address.zip_code"` - it shows the **full path** through the nested structure!
+
+## Multiple Levels of Nesting
+
+You can nest objects arbitrarily deep:
+
+```elixir
+# Location schema (innermost)
+location_schema = Schema.new(%{
+  latitude: %{type: :number, required: true, min: -90, max: 90},
+  longitude: %{type: :number, required: true, min: -180, max: 180}
+})
+
+# Office schema (middle level)
+office_schema = Schema.new(%{
+  name: %{type: :string, required: true},
+  address: %{type: {:object, address_schema}, required: true},
+  location: %{type: {:object, location_schema}, required: true}
+})
+
+# Company schema (top level)
+company_schema = Schema.new(%{
+  name: %{type: :string, required: true},
+  headquarters: %{type: {:object, office_schema}, required: true}
+})
+
+# Deeply nested data
+company = %{
+  "name" => "TechCorp",
+  "headquarters" => %{
+    "name" => "Main Office",
+    "address" => %{
+      "street" => "1 Tech Plaza",
+      "city" => "Seattle",
+      "state" => "WA",
+      "zip_code" => "98101"
+    },
+    "location" => %{
+      "latitude" => 47.6062,
+      "longitude" => -122.3321
+    }
+  }
+}
+
+case Spec.validate(company_schema, company) do
+  {:ok, validated} ->
+    IO.puts("✅ Company validated!")
+    IO.puts("Name: #{validated.name}")
+    IO.puts("HQ: #{validated.headquarters.name}")
+    IO.puts("City: #{validated.headquarters.address.city}")
+    IO.puts("Coordinates: #{validated.headquarters.location.latitude}, #{validated.headquarters.location.longitude}")
+
+  {:error, diagnostics} ->
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+### 💡 Key Insight: Composition
+
+Build complex schemas by **composing** smaller, reusable schemas. This makes code maintainable and testable.
+
+## Arrays of Objects
+
+Combine arrays with nested objects for powerful structures:
+
+```elixir
+# Author schema
+author_schema = Schema.new(%{
+  name: %{type: :string, required: true, min_length: 2},
+  email: %{type: :string, required: true, format: :email},
+  affiliation: %{type: :string, required: true}
+})
+
+# Paper schema with array of authors
+paper_schema = Schema.new(%{
+  title: %{type: :string, required: true, min_length: 10},
+  authors: %{
+    type: {:array, %{type: {:object, author_schema}}},
+    required: true,
+    min_items: 1,
+    max_items: 10
+  },
+  publication_date: %{type: :string, required: true, pattern: ~r/^\d{4}-\d{2}-\d{2}$/}
+})
+
+# Paper with multiple authors
+paper = %{
+  "title" => "Advanced Machine Learning Techniques",
+  "authors" => [
+    %{
+      "name" => "Dr. Sarah Chen",
+      "email" => "s.chen@university.edu",
+      "affiliation" => "Stanford University"
+    },
+    %{
+      "name" => "Prof. James Wilson",
+      "email" => "j.wilson@mit.edu",
+      "affiliation" => "MIT"
+    }
+  ],
+  "publication_date" => "2024-03-15"
+}
+
+case Spec.validate(paper_schema, paper) do
+  {:ok, validated} ->
+    IO.puts("✅ Paper validated!")
+    IO.puts("Title: #{validated.title}")
+    IO.puts("Authors:")
+
+    Enum.each(validated.authors, fn author ->
+      IO.puts("  - #{author.name} (#{author.affiliation})")
+    end)
+
+  {:error, diagnostics} ->
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+### 🎯 Exercise: Add Invalid Author
+
+Try adding an author with an invalid email to the `authors` array. What error message do you get? Does it include the array index?
+
+## Union Types
+
+Union types allow fields to accept **multiple different types**:
+
+```elixir
+# Schema with union types
+flexible_schema = Schema.new(%{
+  id: %{
+    type: {:union, [%{type: :string}, %{type: :integer}]},
+    required: true,
+    description: "ID can be string or integer"
+  },
+  nickname: %{
+    type: {:union, [%{type: :string, max_length: 20}, %{type: :null}]},
+    description: "Nickname or null"
+  }
+})
+
+# Test with string ID
+data1 = %{"id" => "ABC123", "nickname" => "Ally"}
+
+# Test with integer ID
+data2 = %{"id" => 42, "nickname" => nil}
+
+# Test with boolean ID (invalid)
+data3 = %{"id" => true, "nickname" => "Bob"}
+
+IO.puts("String ID:")
+IO.inspect(Spec.validate(flexible_schema, data1))
+
+IO.puts("\nInteger ID:")
+IO.inspect(Spec.validate(flexible_schema, data2))
+
+IO.puts("\nBoolean ID (invalid):")
+{:error, diag} = Spec.validate(flexible_schema, data3)
+IO.puts("Error: #{hd(diag.errors).message}")
+```
+
+### 🔀 When to Use Union Types
+
+Union types are perfect for:
+
+* **Flexible IDs**: String UUIDs or integer IDs
+* **Nullable fields**: `type | null` for optional data
+* **Multiple formats**: Accept email OR phone number
+* **Migration compatibility**: Old and new formats during transitions
+
+## Nullable Fields with Union Types
+
+The most common union pattern is making fields nullable:
+
+```elixir
+# Profile schema with nullable fields
+profile_schema = Schema.new(%{
+  username: %{type: :string, required: true, min_length: 3},
+  display_name: %{
+    type: {:union, [%{type: :string, max_length: 50}, %{type: :null}]},
+    description: "Optional display name"
+  },
+  bio: %{
+    type: {:union, [%{type: :string, max_length: 500}, %{type: :null}]},
+    description: "Optional bio"
+  },
+  website: %{
+    type: {:union, [%{type: :string, format: :url}, %{type: :null}]},
+    description: "Optional website URL"
+  }
+})
+
+# Minimal profile (nulls)
+minimal = %{
+  "username" => "alice",
+  "display_name" => nil,
+  "bio" => nil,
+  "website" => nil
+}
+
+# Complete profile
+complete = %{
+  "username" => "alice",
+  "display_name" => "Alice Johnson",
+  "bio" => "Software engineer and open source contributor",
+  "website" => "https://alice.dev"
+}
+
+IO.puts("Minimal profile:")
+{:ok, val} = Spec.validate(profile_schema, minimal)
+IO.inspect(val)
+
+IO.puts("\nComplete profile:")
+{:ok, val} = Spec.validate(profile_schema, complete)
+IO.inspect(val)
+```
+
+### 📝 Union vs Required: false
+
+**What's the difference?**
+
+* `required: false` - Field can be **omitted** from input entirely
+* `{:union, [type, :null]}` - Field **must be present** but can be `null`
+
+Choose based on your API design!
+
+## Complex Validation Patterns
+
+Combine nested objects, arrays, and unions for sophisticated schemas:
+
+```elixir
+# Contact method schema (union of different contact types)
+phone_schema = Schema.new(%{
+  type: %{type: {:enum, ["mobile", "home", "work"]}, required: true},
+  number: %{type: :string, required: true, pattern: ~r/^\d{3}-\d{3}-\d{4}$/}
+})
+
+email_schema = Schema.new(%{
+  type: %{type: {:enum, ["personal", "work"]}, required: true},
+  address: %{type: :string, required: true, format: :email}
+})
+
+# Person schema with complex contact structure
+person_schema = Schema.new(%{
+  name: %{type: :string, required: true},
+  primary_contact: %{
+    type: {:union, [%{type: {:object, phone_schema}}, %{type: {:object, email_schema}}]},
+    required: true,
+    description: "Primary contact can be phone or email"
+  },
+  secondary_contacts: %{
+    type:
+      {:array, %{type: {:union, [%{type: {:object, phone_schema}}, %{type: {:object, email_schema}}]}}},
+    max_items: 5,
+    description: "Additional contact methods"
+  }
+})
+
+# Person with phone as primary, email as secondary
+person = %{
+  "name" => "Alice Johnson",
+  "primary_contact" => %{
+    "type" => "mobile",
+    "number" => "555-123-4567"
+  },
+  "secondary_contacts" => [
+    %{
+      "type" => "work",
+      "address" => "alice@company.com"
+    }
+  ]
+}
+
+case Spec.validate(person_schema, person) do
+  {:ok, validated} ->
+    IO.puts("✅ Complex validation successful!")
+    IO.puts("Name: #{validated.name}")
+    IO.puts("Primary: #{validated.primary_contact.number}")
+    IO.puts("Secondary: #{hd(validated.secondary_contacts).address}")
+
+  {:error, diagnostics} ->
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+### 🏗️ Design Pattern: Type Discriminators
+
+When using unions of objects, consider adding a `type` field to distinguish them. This makes the LLM's job easier!
+
+## Production Error Handling
+
+Handle errors gracefully in production:
+
+```elixir
+defmodule ProductionValidator do
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  def validate_with_fallback(schema, data, fallback \\ %{}) do
+    case Spec.validate(schema, data) do
+      {:ok, validated} ->
+        {:ok, validated}
+
+      {:error, diagnostics} ->
+        # Log detailed errors
+        log_validation_errors(diagnostics)
+
+        # Return fallback or re-raise
+        if fallback == %{} do
+          {:error, :validation_failed}
+        else
+          {:ok, fallback}
+        end
+    end
+  end
+
+  defp log_validation_errors(diagnostics) do
+    IO.puts("⚠️  Validation failed with #{length(diagnostics.errors)} errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  • Field: #{error.field || "unknown"}")
+      IO.puts("    Message: #{error.message}")
+      IO.puts("    Got: #{inspect(error.got)}")
+    end)
+  end
+end
+
+# Test with invalid data
+schema = Schema.new(%{name: %{type: :string, required: true}})
+invalid = %{"name" => 123}
+fallback = %{"name" => "Default User"}
+
+result = ProductionValidator.validate_with_fallback(schema, invalid, fallback)
+IO.puts("\nResult with fallback:")
+IO.inspect(result)
+```
+
+### 🛡️ Production Best Practices
+
+1. **Log all validation failures** for monitoring
+2. **Provide fallbacks** for non-critical data
+3. **Alert on repeated failures** (circuit breaker pattern)
+4. **Version schemas** for backwards compatibility
+5. **Test with real LLM outputs** before deploying
+
+## Retry Strategies
+
+Customize retry behavior for different scenarios:
+
+```elixir
+defmodule RetryStrategies do
+  @doc """
+  Exponential backoff retry strategy.
+
+  Waits longer between each retry: 1s, 2s, 4s, 8s...
+  """
+  def with_exponential_backoff(func, max_attempts \\ 3) do
+    attempt_with_backoff(func, 1, max_attempts)
+  end
+
+  defp attempt_with_backoff(func, attempt, max_attempts) do
+    case func.() do
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, reason} when attempt < max_attempts ->
+        wait_time = :math.pow(2, attempt - 1) |> trunc()
+        IO.puts("⏳ Retry #{attempt}/#{max_attempts} after #{wait_time}s...")
+        Process.sleep(wait_time * 1000)
+        attempt_with_backoff(func, attempt + 1, max_attempts)
+
+      {:error, reason} ->
+        IO.puts("❌ All retries exhausted")
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Retry with different prompts strategy.
+
+  Each retry uses a different prompt variation to help LLM succeed.
+  """
+  def with_prompt_variations(base_prompt, variations) do
+    prompts = [base_prompt | variations]
+
+    Enum.reduce_while(prompts, {:error, :no_prompts}, fn prompt, _acc ->
+      IO.puts("🔄 Trying prompt variation...")
+
+      # Simulate LLM call
+      case simulate_llm_call(prompt) do
+        {:ok, result} -> {:halt, {:ok, result}}
+        {:error, _} -> {:cont, {:error, :all_failed}}
+      end
+    end)
+  end
+
+  defp simulate_llm_call(_prompt) do
+    # Simulation - in reality, call ExOutlines.generate here
+    if :rand.uniform() > 0.5 do
+      {:ok, "success"}
+    else
+      {:error, :failed}
+    end
+  end
+end
+
+# Test exponential backoff
+IO.puts("Testing exponential backoff:")
+
+RetryStrategies.with_exponential_backoff(fn ->
+  if :rand.uniform() > 0.7, do: {:ok, "success"}, else: {:error, :failed}
+end)
+```
+
+### ⚡ Performance Tip
+
+Exponential backoff prevents overwhelming the LLM API during high load. Use it for production systems!
+
+## Schema Composition Patterns
+
+Build maintainable schemas through composition:
+
+```elixir
+defmodule SchemaLibrary do
+  alias ExOutlines.Spec.Schema
+
+  @doc "Reusable address schema"
+  def address_schema do
+    Schema.new(%{
+      street: %{type: :string, required: true, min_length: 5},
+      city: %{type: :string, required: true, min_length: 2},
+      state: %{type: :string, required: true, pattern: ~r/^[A-Z]{2}$/},
+      zip_code: %{type: :string, required: true, pattern: ~r/^\d{5}(-\d{4})?$/}
+    })
+  end
+
+  @doc "Reusable contact schema"
+  def contact_schema do
+    Schema.new(%{
+      email: %{type: :string, required: true, format: :email},
+      phone: %{type: :string, required: false, pattern: ~r/^\d{3}-\d{3}-\d{4}$/}
+    })
+  end
+
+  @doc "Customer schema using composed schemas"
+  def customer_schema do
+    Schema.new(%{
+      name: %{type: :string, required: true, min_length: 2},
+      contact: %{type: {:object, contact_schema()}, required: true},
+      shipping_address: %{type: {:object, address_schema()}, required: true},
+      billing_address: %{type: {:object, address_schema()}, required: false}
+    })
+  end
+
+  @doc "Business schema reusing same components"
+  def business_schema do
+    Schema.new(%{
+      business_name: %{type: :string, required: true},
+      headquarters: %{type: {:object, address_schema()}, required: true},
+      contact: %{type: {:object, contact_schema()}, required: true}
+    })
+  end
+end
+
+IO.puts("✅ Schema library created!")
+IO.puts("\nReusable schemas:")
+IO.puts("  • address_schema")
+IO.puts("  • contact_schema")
+IO.puts("  • customer_schema (composed)")
+IO.puts("  • business_schema (composed)")
+```
+
+### 📚 Benefits of Composition
+
+1. **DRY**: Don't repeat schema definitions
+2. **Consistency**: Same validation rules everywhere
+3. **Maintainability**: Update once, applies everywhere
+4. **Testability**: Test small schemas independently
+
+## Telemetry and Monitoring
+
+Add observability to your schemas:
+
+```elixir
+defmodule TelemetryValidator do
+  alias ExOutlines.Spec
+
+  def validate_with_metrics(schema, data, metadata \\ %{}) do
+    start_time = System.monotonic_time()
+
+    result = Spec.validate(schema, data)
+
+    duration = System.monotonic_time() - start_time
+
+    # Emit telemetry event
+    :telemetry.execute(
+      [:ex_outlines, :validation, :complete],
+      %{duration: duration},
+      Map.merge(metadata, %{
+        success: match?({:ok, _}, result),
+        error_count: count_errors(result)
+      })
+    )
+
+    result
+  end
+
+  defp count_errors({:ok, _}), do: 0
+  defp count_errors({:error, diagnostics}), do: length(diagnostics.errors)
+end
+
+# Attach telemetry handler
+:telemetry.attach(
+  "validation-logger",
+  [:ex_outlines, :validation, :complete],
+  fn _event, measurements, metadata, _config ->
+    status = if metadata.success, do: "✅", else: "❌"
+
+    IO.puts(
+      "#{status} Validation completed in #{measurements.duration}µs (errors: #{metadata.error_count})"
+    )
+  end,
+  nil
+)
+
+# Test telemetry
+schema = Schema.new(%{name: %{type: :string, required: true}})
+
+IO.puts("Valid data:")
+TelemetryValidator.validate_with_metrics(schema, %{"name" => "Alice"})
+
+IO.puts("\nInvalid data:")
+TelemetryValidator.validate_with_metrics(schema, %{"name" => 123})
+```
+
+### 📊 What to Monitor
+
+* **Validation success rate**: Track failures over time
+* **Validation duration**: Detect performance issues
+* **Error types**: Identify common validation problems
+* **Retry rates**: Monitor LLM reliability
+
+## Performance Optimization
+
+Tips for optimizing ExOutlines in production:
+
+```elixir
+defmodule PerformanceDemo do
+  alias ExOutlines.Spec.Schema
+
+  @doc """
+  ❌ BAD: Creating schema on every validation
+  """
+  def validate_slow(data) do
+    # Schema created every time!
+    schema = Schema.new(%{name: %{type: :string, required: true}})
+    ExOutlines.Spec.validate(schema, data)
+  end
+
+  @doc """
+  ✅ GOOD: Reuse compiled schema
+  """
+  def validate_fast(data, schema) do
+    # Schema passed in, created once
+    ExOutlines.Spec.validate(schema, data)
+  end
+
+  @doc """
+  ✅ BEST: Module attribute (compile-time)
+  """
+  @user_schema Schema.new(%{name: %{type: :string, required: true}})
+
+  def validate_fastest(data) do
+    ExOutlines.Spec.validate(@user_schema, data)
+  end
+end
+
+# Benchmark
+schema = Schema.new(%{name: %{type: :string, required: true}})
+data = %{"name" => "Alice"}
+
+# Time 1000 validations
+measure = fn func ->
+  start = System.monotonic_time()
+
+  Enum.each(1..1000, fn _ -> func.() end)
+
+  duration = System.monotonic_time() - start
+  duration / 1_000_000
+end
+
+IO.puts("Performance comparison (1000 validations):")
+IO.puts("  Schema creation per call: #{measure.(fn -> PerformanceDemo.validate_slow(data) end)}ms")
+IO.puts("  Reused schema: #{measure.(fn -> PerformanceDemo.validate_fast(data, schema) end)}ms")
+
+IO.puts(
+  "  Module attribute: #{measure.(fn -> PerformanceDemo.validate_fastest(data) end)}ms"
+)
+```
+
+### ⚡ Performance Best Practices
+
+1. **Create schemas once**: Store in module attributes or application state
+2. **Batch validations**: Validate multiple items together when possible
+3. **Profile first**: Measure before optimizing
+4. **Cache JSON schemas**: Generate once, reuse in prompts
+5. **Use concurrent validation**: For independent items, validate in parallel
+
+## Real-World Integration: Phoenix API
+
+Complete example of ExOutlines in a Phoenix API:
+
+```elixir
+defmodule MyAppWeb.UserController do
+  use Phoenix.Controller
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  # Define schema as module attribute (performance!)
+  @user_registration_schema Schema.new(%{
+                              email: %{type: :string, required: true, format: :email},
+                              username: %{
+                                type: :string,
+                                required: true,
+                                min_length: 3,
+                                max_length: 20
+                              },
+                              age: %{type: :integer, required: true, min: 13, max: 120},
+                              preferences: %{
+                                type: {:object, Schema.new(%{
+                                  newsletter: %{type: :boolean, required: true},
+                                  theme: %{
+                                    type: {:enum, ["light", "dark", "auto"]},
+                                    required: true
+                                  }
+                                })},
+                                required: true
+                              }
+                            })
+
+  def register(conn, params) do
+    # Extract registration data (from LLM or form)
+    case Spec.validate(@user_registration_schema, params) do
+      {:ok, validated_data} ->
+        # Create user with validated data
+        case MyApp.Accounts.create_user(validated_data) do
+          {:ok, user} ->
+            conn
+            |> put_status(:created)
+            |> json(%{id: user.id, email: user.email})
+
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{errors: translate_errors(changeset)})
+        end
+
+      {:error, diagnostics} ->
+        # Return validation errors to client
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          errors: Enum.map(diagnostics.errors, &format_error/1)
+        })
+    end
+  end
+
+  defp format_error(error) do
+    %{
+      field: error.field,
+      message: error.message,
+      code: :validation_failed
+    }
+  end
+
+  defp translate_errors(changeset) do
+    # Ecto changeset error translation
+    []
+  end
+end
+
+IO.puts("✅ Phoenix controller pattern demonstrated!")
+```
+
+### 🏭 Production Checklist
+
+Before deploying ExOutlines to production:
+
+* ☑️ Define schemas as module attributes
+* ☑️ Add telemetry for monitoring
+* ☑️ Implement retry strategies with backoff
+* ☑️ Log validation failures for debugging
+* ☑️ Version your schemas for compatibility
+* ☑️ Add circuit breakers for LLM failures
+* ☑️ Cache JSON schemas when possible
+* ☑️ Test with real LLM outputs
+* ☑️ Set up alerting for high failure rates
+* ☑️ Document expected schemas for your team
+
+## Key Takeaways
+
+Congratulations! 🎉 You've mastered advanced ExOutlines patterns:
+
+### Structures
+* 🏗️ **Nested Objects**: Multi-level hierarchical data
+* 🔀 **Union Types**: Flexible fields accepting multiple types
+* 📦 **Arrays of Objects**: Complex collections
+* 🎯 **Nullable Fields**: Proper null handling with unions
+
+### Patterns
+* 📚 **Schema Composition**: Reusable, maintainable schemas
+* 🛡️ **Error Handling**: Production-grade validation
+* ⚡ **Performance**: Optimization strategies
+* 📊 **Telemetry**: Monitoring and observability
+
+### Production
+* 🏭 **Phoenix Integration**: Real-world API patterns
+* 🔄 **Retry Strategies**: Exponential backoff, prompt variations
+* ✅ **Best Practices**: Checklist for production readiness
+
+### 📚 Next Steps
+
+* **Examples**: Check `examples/` for complete production use cases
+* **Documentation**: Full API docs at hexdocs.pm
+* **Community**: Share your patterns and learn from others
+
+### 🚀 You're Ready!
+
+You now have everything you need to build sophisticated, production-ready LLM integrations with ExOutlines!
+
+Happy building! 💪
