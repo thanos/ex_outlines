@@ -116,7 +116,7 @@ defmodule ExOutlines.GenerationTest do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
       # Return invalid JSON to trigger retries
-      mock = Mock.new([{:ok, "invalid json"}])
+      mock = Mock.always({:ok, "invalid json"})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -128,7 +128,7 @@ defmodule ExOutlines.GenerationTest do
     test "respects custom max_retries value" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
-      mock = Mock.new([{:ok, "invalid json"}])
+      mock = Mock.always({:ok, "invalid json"})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -192,7 +192,7 @@ defmodule ExOutlines.GenerationTest do
     test "treats invalid JSON as validation failure" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
-      mock = Mock.new([{:ok, "not valid json"}])
+      mock = Mock.always({:ok, "not valid json"})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -218,7 +218,7 @@ defmodule ExOutlines.GenerationTest do
     test "handles empty response" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
-      mock = Mock.new([{:ok, ""}])
+      mock = Mock.always({:ok, ""})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -238,7 +238,7 @@ defmodule ExOutlines.GenerationTest do
 
       # First attempt: negative age (invalid)
       # Second attempt: still retries (mock is stateless, returns same response)
-      mock = Mock.new([{:ok, ~s({"age": -5})}])
+      mock = Mock.always({:ok, ~s({"age": -5})})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -252,7 +252,7 @@ defmodule ExOutlines.GenerationTest do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
       # Always return invalid response
-      mock = Mock.new([{:ok, ~s({"age": 30})}])
+      mock = Mock.always({:ok, ~s({"age": 30})})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -269,8 +269,12 @@ defmodule ExOutlines.GenerationTest do
           age: %{type: :integer, required: true}
         })
 
-      # Missing age field
-      mock = Mock.new([{:ok, ~s({"name": "Alice"})}])
+      # Missing age field for all attempts (initial + 2 retries = 3 total)
+      mock = Mock.new([
+        {:ok, ~s({"name": "Alice"})},
+        {:ok, ~s({"name": "Alice"})},
+        {:ok, ~s({"name": "Alice"})}
+      ])
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -284,7 +288,7 @@ defmodule ExOutlines.GenerationTest do
       schema = Schema.new(%{age: %{type: :integer, required: true}})
 
       # Age is string instead of integer
-      mock = Mock.new([{:ok, ~s({"age": "thirty"})}])
+      mock = Mock.always({:ok, ~s({"age": "thirty"})})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -301,7 +305,7 @@ defmodule ExOutlines.GenerationTest do
         })
 
       # Invalid enum value
-      mock = Mock.new([{:ok, ~s({"role": "superadmin"})}])
+      mock = Mock.always({:ok, ~s({"role": "superadmin"})})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,
@@ -335,7 +339,7 @@ defmodule ExOutlines.GenerationTest do
     test "returns :max_retries_exceeded after exhausting attempts" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
-      mock = Mock.new([{:ok, ~s({"wrong_field": "value"})}])
+      mock = Mock.always({:ok, ~s({"wrong_field": "value"})})
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,

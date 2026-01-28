@@ -32,11 +32,11 @@ defmodule ExOutlines.Backend.Mock do
 
   @type response :: {:ok, String.t()} | {:error, term()}
   @type t :: %__MODULE__{
-          responses: [response()],
+          agent_pid: pid(),
           call_count: non_neg_integer()
         }
 
-  defstruct responses: [], call_count: 0
+  defstruct [:agent_pid, call_count: 0]
 
   @doc """
   Create a new mock backend with pre-configured responses.
@@ -55,7 +55,8 @@ defmodule ExOutlines.Backend.Mock do
   """
   @spec new([response()]) :: t()
   def new(responses) when is_list(responses) do
-    %__MODULE__{responses: responses, call_count: 0}
+    {:ok, agent_pid} = Agent.start_link(fn -> {responses, 0} end)
+    %__MODULE__{agent_pid: agent_pid, call_count: 0}
   end
 
   @doc """
@@ -69,7 +70,9 @@ defmodule ExOutlines.Backend.Mock do
   """
   @spec always(response()) :: t()
   def always(response) do
-    %__MODULE__{responses: [response], call_count: 0}
+    # For always, we use an infinite list (repeat the response)
+    {:ok, agent_pid} = Agent.start_link(fn -> {Stream.cycle([response]) |> Enum.take(1000), 0} end)
+    %__MODULE__{agent_pid: agent_pid, call_count: 0}
   end
 
   @doc """
@@ -96,7 +99,9 @@ defmodule ExOutlines.Backend.Mock do
       0
   """
   @spec call_count(t()) :: non_neg_integer()
-  def call_count(%__MODULE__{call_count: count}), do: count
+  def call_count(%__MODULE__{agent_pid: agent_pid}) do
+    Agent.get(agent_pid, fn {_responses, count} -> count end)
+  end
 
   @doc """
   Call the mock backend.
@@ -125,15 +130,17 @@ defmodule ExOutlines.Backend.Mock do
 
   # Private helpers
 
-  defp get_next_response(%__MODULE__{responses: [], call_count: count}) do
-    # No more responses configured
-    _ = count
-    {:error, :no_more_responses}
-  end
+  defp get_next_response(%__MODULE__{agent_pid: agent_pid}) do
+    Agent.get_and_update(agent_pid, fn {responses, count} ->
+      case responses do
+        [] ->
+          # No more responses configured
+          {{:error, :no_more_responses}, {[], count + 1}}
 
-  defp get_next_response(%__MODULE__{responses: [response | _rest]}) do
-    # Return the next response
-    # Note: In real usage, you'd track state in a GenServer or Agent
-    response
+        [response | rest] ->
+          # Return the next response and update state
+          {response, {rest, count + 1}}
+      end
+    end)
   end
 end

@@ -10,14 +10,16 @@ defmodule ExOutlines.Backend.MockTest do
       responses = [{:ok, "response 1"}, {:ok, "response 2"}]
       mock = Mock.new(responses)
 
-      assert mock.responses == responses
+      # Verify mock is created with agent_pid
+      assert is_pid(mock.agent_pid)
       assert mock.call_count == 0
     end
 
     test "accepts empty response list" do
       mock = Mock.new([])
 
-      assert mock.responses == []
+      # Verify mock is created
+      assert is_pid(mock.agent_pid)
     end
   end
 
@@ -25,13 +27,15 @@ defmodule ExOutlines.Backend.MockTest do
     test "creates a mock with single repeated response" do
       mock = Mock.always({:ok, "same"})
 
-      assert mock.responses == [{:ok, "same"}]
+      # Verify mock is created
+      assert is_pid(mock.agent_pid)
     end
 
     test "works with error responses" do
       mock = Mock.always({:error, :timeout})
 
-      assert mock.responses == [{:error, :timeout}]
+      # Verify mock is created
+      assert is_pid(mock.agent_pid)
     end
   end
 
@@ -39,7 +43,8 @@ defmodule ExOutlines.Backend.MockTest do
     test "creates a mock that always returns error" do
       mock = Mock.always_fail(:rate_limited)
 
-      assert mock.responses == [{:error, :rate_limited}]
+      # Verify mock is created
+      assert is_pid(mock.agent_pid)
     end
   end
 
@@ -168,8 +173,12 @@ defmodule ExOutlines.Backend.MockTest do
 
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
-      # Always return invalid JSON
-      mock = Mock.new([{:ok, "invalid json"}])
+      # Return invalid JSON for all attempts (initial + 2 retries = 3 total)
+      mock = Mock.new([
+        {:ok, "invalid json"},
+        {:ok, "invalid json"},
+        {:ok, "invalid json"}
+      ])
 
       result =
         ExOutlines.generate(schema,
@@ -178,7 +187,7 @@ defmodule ExOutlines.Backend.MockTest do
           max_retries: 2
         )
 
-      # Since mock is stateless, it will keep returning the same response
+      # All attempts return invalid JSON, so max retries is exceeded
       assert {:error, :max_retries_exceeded} = result
     end
   end

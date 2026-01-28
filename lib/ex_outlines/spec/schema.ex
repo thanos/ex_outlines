@@ -183,6 +183,14 @@ defmodule ExOutlines.Spec.Schema do
   # Private helpers
 
   defp normalize_field_spec(spec) when is_map(spec) do
+    # If Ecto is available, normalize Ecto-style DSL first
+    spec =
+      if Code.ensure_loaded?(ExOutlines.Ecto) do
+        ExOutlines.Ecto.normalize_field_spec(spec)
+      else
+        spec
+      end
+
     # Compile string pattern to Regex if needed
     pattern =
       case Map.get(spec, :pattern) do
@@ -204,7 +212,10 @@ defmodule ExOutlines.Spec.Schema do
       max_items: Map.get(spec, :max_items),
       unique_items: Map.get(spec, :unique_items, false),
       pattern: pattern,
-      format: Map.get(spec, :format)
+      format: Map.get(spec, :format),
+      # Preserve Ecto-style DSL fields for optional Ecto integration
+      length: Map.get(spec, :length),
+      number: Map.get(spec, :number)
     }
   end
 
