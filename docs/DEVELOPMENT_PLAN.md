@@ -431,7 +431,7 @@ Some steps add:
 | 10. Getting Started Livebook | ✅ Complete | 223 | Interactive tutorial notebook |
 | 11. Advanced Patterns Livebook | ✅ Complete | 223 | Advanced features notebook |
 | 12. Anthropic Backend | ✅ Complete | 243 | Native Anthropic Claude API backend |
-| 13. Batch Processing | ⏳ Pending | - | - |
+| 13. Batch Processing | ✅ Complete | 261 | Concurrent batch processing with Task.async_stream |
 | 14. How-To Guides | ⏳ Pending | - | - |
 | 15. Benchmarks | ⏳ Pending | - | - |
 
