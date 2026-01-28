@@ -36,3 +36,4 @@ coveralls.json
 docs_output.txt
 
 /benchmarks/output/
+/local_docs/

@@ -8,7 +8,7 @@ Mix.install([
 
 ## Introduction
 
-Welcome to **ExOutlines**! 👋
+Welcome to **ExOutlines**!
 
 ExOutlines is an Elixir library for extracting **structured, validated data** from Large Language Model (LLM) outputs. It ensures that LLM responses conform to your specified schemas, making AI integrations reliable and predictable.
 
@@ -16,12 +16,12 @@ ExOutlines is an Elixir library for extracting **structured, validated data** fr
 
 By the end of this notebook, you'll be able to:
 
-* ✅ Create schemas to define expected data structures
-* ✅ Add validation constraints (lengths, ranges, patterns)
-* ✅ Understand required vs optional fields
-* ✅ Use enums for controlled vocabularies
-* ✅ Validate data and handle errors
-* ✅ Test schemas with the Mock backend
+* Create schemas to define expected data structures
+* Add validation constraints (lengths, ranges, patterns)
+* Understand required vs optional fields
+* Use enums for controlled vocabularies
+* Validate data and handle errors
+* Test schemas with the Mock backend
 
 ### Why ExOutlines?
 
@@ -31,7 +31,7 @@ LLMs are powerful but unpredictable. ExOutlines solves three key problems:
 2. **Validation**: Data must meet constraints (lengths, formats, ranges).
 3. **Reliability**: Automatic retry/repair when validation fails.
 
-Let's get started! 🚀
+Let's get started!
 
 ## Your First Schema
 
@@ -46,14 +46,14 @@ user_schema = Schema.new(%{
   age: %{type: :integer, required: true}
 })
 
-IO.puts("✅ Schema created!")
+IO.puts("Schema created!")
 IO.inspect(user_schema, pretty: true)
 ```
 
 <!-- livebook:{"output":true} -->
 
 ```
-✅ Schema created!
+Schema created!
 %ExOutlines.Spec.Schema{
   fields: %{
     name: %{type: :string, required: true, ...},
@@ -62,7 +62,7 @@ IO.inspect(user_schema, pretty: true)
 }
 ```
 
-### 💡 What Just Happened?
+### What Just Happened?
 
 We created a schema with two fields:
 
@@ -81,7 +81,7 @@ valid_user = %{"name" => "Alice", "age" => 30}
 
 case Spec.validate(user_schema, valid_user) do
   {:ok, validated} ->
-    IO.puts("✅ Validation successful!")
+    IO.puts("Validation successful!")
     IO.inspect(validated, pretty: true)
 
   {:error, diagnostics} ->
@@ -93,11 +93,11 @@ end
 <!-- livebook:{"output":true} -->
 
 ```
-✅ Validation successful!
+Validation successful!
 %{name: "Alice", age: 30}
 ```
 
-### 🔑 Key Insight: Key Conversion
+### Key Insight: Key Conversion
 
 Notice that the input used **string keys** (`"name"`, `"age"`) but the output has **atom keys** (`:name`, `:age`).
 
@@ -113,7 +113,7 @@ invalid_user = %{"name" => "Bob", "age" => "thirty"}
 
 case Spec.validate(user_schema, invalid_user) do
   {:ok, _} ->
-    IO.puts("✅ Validation successful!")
+    IO.puts("Validation successful!")
 
   {:error, diagnostics} ->
     IO.puts("❌ Validation failed!")
@@ -140,7 +140,7 @@ Errors:
     Got: "thirty"
 ```
 
-### 📊 Error Structure
+### Error Structure
 
 Validation errors include:
 
@@ -178,7 +178,7 @@ constrained_schema = Schema.new(%{
   }
 })
 
-IO.puts("✅ Constrained schema created!")
+IO.puts("Constrained schema created!")
 ```
 
 Let's test it:
@@ -193,7 +193,7 @@ valid_data = %{
 
 case Spec.validate(constrained_schema, valid_data) do
   {:ok, validated} ->
-    IO.puts("✅ All constraints satisfied!")
+    IO.puts("All constraints satisfied!")
     IO.inspect(validated)
 
   {:error, diagnostics} ->
@@ -217,7 +217,7 @@ invalid_data = %{
 
 case Spec.validate(constrained_schema, invalid_data) do
   {:ok, _} ->
-    IO.puts("✅ Valid")
+    IO.puts("Valid")
 
   {:error, diagnostics} ->
     IO.puts("❌ Found #{length(diagnostics.errors)} validation errors:\n")
@@ -225,7 +225,7 @@ case Spec.validate(constrained_schema, invalid_data) do
 end
 ```
 
-### 🎯 Exercise: Fix the Data
+### Exercise: Fix the Data
 
 Modify the `invalid_data` map above to make all validations pass. What values work?
 
@@ -268,7 +268,7 @@ IO.puts("\nComplete profile:")
 IO.inspect(Spec.validate(profile_schema, complete))
 ```
 
-### 📝 Default Behavior
+### Default Behavior
 
 * `required: true` - Field **must** be present
 * `required: false` or omitted - Field is **optional**
@@ -319,7 +319,7 @@ IO.puts("\nInvalid product:")
 Enum.each(diag.errors, &IO.puts("  • #{&1.message}"))
 ```
 
-### ✨ Enum Benefits
+### Enum Benefits
 
 * **Type safety**: Only predefined values are accepted
 * **Clear errors**: Shows all allowed values in error messages
@@ -369,7 +369,7 @@ IO.puts("\nInvalid blog (duplicate tags):")
 Enum.each(diag.errors, &IO.puts("  • #{&1.message}"))
 ```
 
-### 🔢 Array Constraints
+### Array Constraints
 
 * **min_items**: Minimum array length
 * **max_items**: Maximum array length
@@ -395,7 +395,7 @@ IO.puts("JSON Schema for LLM:")
 IO.inspect(json_schema, pretty: true, limit: :infinity)
 ```
 
-### 🤖 How It Works
+### How It Works
 
 1. Define your schema in Elixir
 2. ExOutlines generates JSON Schema
@@ -458,7 +458,7 @@ IO.puts("Mock backend result:")
 IO.inspect(result)
 ```
 
-### 🧪 Why Mock?
+### Why Mock?
 
 * **Fast**: No network calls
 * **Deterministic**: Predictable outputs for testing
@@ -521,7 +521,7 @@ review = %{
 
 case Spec.validate(movie_review_schema, review) do
   {:ok, validated} ->
-    IO.puts("✅ Movie review validated!")
+    IO.puts("Movie review validated!")
     IO.puts("\nReview Details:")
     IO.puts("  Title: #{validated.title}")
     IO.puts("  Rating: #{String.duplicate("⭐", validated.rating)}")
@@ -599,7 +599,7 @@ IO.puts("\nInvalid contact:")
 Enum.each(diag.errors, &IO.puts("  • #{&1.message}"))
 ```
 
-### 📋 Built-in Formats
+### Built-in Formats
 
 ExOutlines includes common format validators:
 
@@ -613,18 +613,18 @@ You can also use **custom regex patterns** for specific formats!
 
 ## Key Takeaways
 
-Congratulations! 🎉 You've learned the fundamentals of ExOutlines:
+Congratulations! You've learned the fundamentals of ExOutlines:
 
-* ✅ **Schemas**: Define expected data structure
-* ✅ **Constraints**: Enforce length, range, and format rules
-* ✅ **Required/Optional**: Control which fields are mandatory
-* ✅ **Enums**: Restrict values to predefined options
-* ✅ **Arrays**: Validate lists with item constraints
-* ✅ **Validation**: Check data and get detailed errors
-* ✅ **Mock Backend**: Test without LLM API calls
-* ✅ **Retry-Repair**: Automatic error correction with LLMs
+* **Schemas**: Define expected data structure
+* **Constraints**: Enforce length, range, and format rules
+* **Required/Optional**: Control which fields are mandatory
+* **Enums**: Restrict values to predefined options
+* **Arrays**: Validate lists with item constraints
+* **Validation**: Check data and get detailed errors
+* **Mock Backend**: Test without LLM API calls
+* **Retry-Repair**: Automatic error correction with LLMs
 
-### 📚 Next Steps
+### Next Steps
 
 Ready for more advanced topics? Check out:
 
@@ -632,9 +632,9 @@ Ready for more advanced topics? Check out:
 * **Examples**: See `examples/` directory for production use cases
 * **Documentation**: Full API docs at hexdocs.pm
 
-### 🤔 Questions?
+### Questions?
 
 * GitHub Issues: [github.com/your-org/ex_outlines/issues](https://github.com/your-org/ex_outlines/issues)
 * Community: Join discussions and share your projects!
 
-Happy coding! 🚀
+Happy coding!
