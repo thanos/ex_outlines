@@ -73,6 +73,8 @@ defmodule ExOutlines.Spec.Schema do
   @phone_pattern ~r/^\d{3}-\d{3}-\d{4}$/
   @date_pattern ~r/^\d{4}-\d{2}-\d{2}$/
 
+  @type format :: :email | :url | :uuid | :phone | :date
+
   @type item_spec :: %{
           type: :string | :integer | :boolean | :number | {:enum, [any()]},
           min_length: non_neg_integer() | nil,
@@ -82,17 +84,7 @@ defmodule ExOutlines.Spec.Schema do
         }
 
   @type field_type ::
-          :string
-          | :integer
-          | :boolean
-          | :number
-          | :null
-          | {:enum, [any()]}
-          | {:array, item_spec()}
-          | {:object, t()}
-          | {:union, [field_spec()]}
-
-  @type format :: :email | :url | :uuid | :phone | :date
+          :string | :integer | :boolean | :number | {:enum, [any()]} | {:array, item_spec()}
 
   @type field_spec :: %{
           type: field_type(),
@@ -106,8 +98,7 @@ defmodule ExOutlines.Spec.Schema do
           min_items: non_neg_integer() | nil,
           max_items: pos_integer() | nil,
           unique_items: boolean(),
-          pattern: Regex.t() | nil,
-          format: format() | nil
+          pattern: Regex.t() | nil
         }
 
   @type t :: %__MODULE__{
