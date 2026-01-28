@@ -43,6 +43,8 @@ defmodule ExOutlines.MixProject do
     [
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.2"},
+      {:benchee, "~> 1.3", only: :dev},
+      {:benchee_html, "~> 1.0", only: :dev},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -73,7 +75,7 @@ defmodule ExOutlines.MixProject do
   defp docs do
     [
       main: "ExOutlines",
-      extras: ["README.md", "CHANGELOG.md"]
+      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
     ]
   end
 end
