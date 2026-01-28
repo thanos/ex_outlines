@@ -96,8 +96,7 @@ defmodule ExOutlines.Spec.Schema do
           min_items: non_neg_integer() | nil,
           max_items: pos_integer() | nil,
           unique_items: boolean(),
-          pattern: Regex.t() | nil,
-          format: format() | nil
+          pattern: Regex.t() | nil
         }
 
   @type t :: %__MODULE__{
