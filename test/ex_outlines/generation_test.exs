@@ -270,11 +270,12 @@ defmodule ExOutlines.GenerationTest do
         })
 
       # Missing age field for all attempts (initial + 2 retries = 3 total)
-      mock = Mock.new([
-        {:ok, ~s({"name": "Alice"})},
-        {:ok, ~s({"name": "Alice"})},
-        {:ok, ~s({"name": "Alice"})}
-      ])
+      mock =
+        Mock.new([
+          {:ok, ~s({"name": "Alice"})},
+          {:ok, ~s({"name": "Alice"})},
+          {:ok, ~s({"name": "Alice"})}
+        ])
 
       assert {:error, :max_retries_exceeded} =
                ExOutlines.generate(schema,

@@ -174,11 +174,12 @@ defmodule ExOutlines.Backend.MockTest do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
       # Return invalid JSON for all attempts (initial + 2 retries = 3 total)
-      mock = Mock.new([
-        {:ok, "invalid json"},
-        {:ok, "invalid json"},
-        {:ok, "invalid json"}
-      ])
+      mock =
+        Mock.new([
+          {:ok, "invalid json"},
+          {:ok, "invalid json"},
+          {:ok, "invalid json"}
+        ])
 
       result =
         ExOutlines.generate(schema,
