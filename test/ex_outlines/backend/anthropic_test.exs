@@ -140,9 +140,10 @@ defmodule ExOutlines.Backend.AnthropicTest do
       # This is an integration test showing how to use the backend
       # In real usage, you would provide a valid API key
 
-      schema = ExOutlines.Spec.Schema.new(%{
-        name: %{type: :string, required: true}
-      })
+      schema =
+        ExOutlines.Spec.Schema.new(%{
+          name: %{type: :string, required: true}
+        })
 
       result =
         ExOutlines.generate(schema,
@@ -158,9 +159,10 @@ defmodule ExOutlines.Backend.AnthropicTest do
     end
 
     test "accepts all configuration options" do
-      schema = ExOutlines.Spec.Schema.new(%{
-        name: %{type: :string, required: true}
-      })
+      schema =
+        ExOutlines.Spec.Schema.new(%{
+          name: %{type: :string, required: true}
+        })
 
       result =
         ExOutlines.generate(schema,
