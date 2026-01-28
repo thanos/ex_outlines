@@ -1,0 +1,640 @@
+# Getting Started with ExOutlines
+
+```elixir
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"}
+])
+```
+
+## Introduction
+
+Welcome to **ExOutlines**! 👋
+
+ExOutlines is an Elixir library for extracting **structured, validated data** from Large Language Model (LLM) outputs. It ensures that LLM responses conform to your specified schemas, making AI integrations reliable and predictable.
+
+### What You'll Learn
+
+By the end of this notebook, you'll be able to:
+
+* ✅ Create schemas to define expected data structures
+* ✅ Add validation constraints (lengths, ranges, patterns)
+* ✅ Understand required vs optional fields
+* ✅ Use enums for controlled vocabularies
+* ✅ Validate data and handle errors
+* ✅ Test schemas with the Mock backend
+
+### Why ExOutlines?
+
+LLMs are powerful but unpredictable. ExOutlines solves three key problems:
+
+1. **Structure**: LLMs generate free-form text. ExOutlines ensures structured output.
+2. **Validation**: Data must meet constraints (lengths, formats, ranges).
+3. **Reliability**: Automatic retry/repair when validation fails.
+
+Let's get started! 🚀
+
+## Your First Schema
+
+A **schema** defines the structure of data you expect. Let's create a simple user schema:
+
+```elixir
+alias ExOutlines.{Spec, Spec.Schema}
+
+# Define a simple user schema
+user_schema = Schema.new(%{
+  name: %{type: :string, required: true},
+  age: %{type: :integer, required: true}
+})
+
+IO.puts("✅ Schema created!")
+IO.inspect(user_schema, pretty: true)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+✅ Schema created!
+%ExOutlines.Spec.Schema{
+  fields: %{
+    name: %{type: :string, required: true, ...},
+    age: %{type: :integer, required: true, ...}
+  }
+}
+```
+
+### 💡 What Just Happened?
+
+We created a schema with two fields:
+
+* **name**: A string field marked as required
+* **age**: An integer field marked as required
+
+Schemas are defined using a map where keys are field names and values are field specifications.
+
+## Validating Data
+
+Now let's validate some data against our schema:
+
+```elixir
+# Valid data
+valid_user = %{"name" => "Alice", "age" => 30}
+
+case Spec.validate(user_schema, valid_user) do
+  {:ok, validated} ->
+    IO.puts("✅ Validation successful!")
+    IO.inspect(validated, pretty: true)
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Validation failed")
+    IO.inspect(diagnostics, pretty: true)
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+✅ Validation successful!
+%{name: "Alice", age: 30}
+```
+
+### 🔑 Key Insight: Key Conversion
+
+Notice that the input used **string keys** (`"name"`, `"age"`) but the output has **atom keys** (`:name`, `:age`).
+
+ExOutlines automatically converts string keys to atoms for ergonomic Elixir code.
+
+## Handling Validation Errors
+
+What happens when data doesn't match the schema?
+
+```elixir
+# Invalid data - age is a string instead of integer
+invalid_user = %{"name" => "Bob", "age" => "thirty"}
+
+case Spec.validate(user_schema, invalid_user) do
+  {:ok, _} ->
+    IO.puts("✅ Validation successful!")
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Validation failed!")
+    IO.puts("\nErrors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  • Field: #{error.field}")
+      IO.puts("    Message: #{error.message}")
+      IO.puts("    Expected: #{error.expected}")
+      IO.puts("    Got: #{inspect(error.got)}")
+    end)
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+❌ Validation failed!
+
+Errors:
+  • Field: age
+    Message: Field 'age' must be an integer
+    Expected: integer
+    Got: "thirty"
+```
+
+### 📊 Error Structure
+
+Validation errors include:
+
+* **field**: Which field failed validation
+* **message**: Human-readable error description
+* **expected**: What type/constraint was expected
+* **got**: The actual value that failed
+
+## Adding Constraints
+
+Schemas can include constraints to enforce data quality:
+
+```elixir
+# User schema with constraints
+constrained_schema = Schema.new(%{
+  username: %{
+    type: :string,
+    required: true,
+    min_length: 3,
+    max_length: 20,
+    description: "Username must be 3-20 characters"
+  },
+  age: %{
+    type: :integer,
+    required: true,
+    min: 0,
+    max: 120,
+    description: "Age must be between 0 and 120"
+  },
+  email: %{
+    type: :string,
+    required: true,
+    format: :email,
+    description: "Valid email address"
+  }
+})
+
+IO.puts("✅ Constrained schema created!")
+```
+
+Let's test it:
+
+```elixir
+# Test valid data
+valid_data = %{
+  "username" => "alice_123",
+  "age" => 25,
+  "email" => "alice@example.com"
+}
+
+case Spec.validate(constrained_schema, valid_data) do
+  {:ok, validated} ->
+    IO.puts("✅ All constraints satisfied!")
+    IO.inspect(validated)
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Constraint violations:")
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+Now try invalid data:
+
+```elixir
+# Test invalid data
+invalid_data = %{
+  "username" => "ab",
+  # Too short (min 3)
+  "age" => 150,
+  # Too old (max 120)
+  "email" => "not-an-email"
+  # Invalid format
+}
+
+case Spec.validate(constrained_schema, invalid_data) do
+  {:ok, _} ->
+    IO.puts("✅ Valid")
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Found #{length(diagnostics.errors)} validation errors:\n")
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+### 🎯 Exercise: Fix the Data
+
+Modify the `invalid_data` map above to make all validations pass. What values work?
+
+## Required vs Optional Fields
+
+Not all fields need to be required:
+
+```elixir
+# Schema with optional fields
+profile_schema = Schema.new(%{
+  name: %{
+    type: :string,
+    required: true,
+    min_length: 2
+  },
+  nickname: %{
+    type: :string,
+    required: false,
+    # Optional - can be omitted
+    max_length: 20
+  },
+  bio: %{
+    type: :string,
+    required: false,
+    # Optional
+    max_length: 500
+  }
+})
+
+# Valid: only required fields
+minimal = %{"name" => "Alice"}
+
+# Valid: with optional fields
+complete = %{"name" => "Alice", "nickname" => "Ally", "bio" => "Software engineer"}
+
+IO.puts("Minimal profile:")
+IO.inspect(Spec.validate(profile_schema, minimal))
+
+IO.puts("\nComplete profile:")
+IO.inspect(Spec.validate(profile_schema, complete))
+```
+
+### 📝 Default Behavior
+
+* `required: true` - Field **must** be present
+* `required: false` or omitted - Field is **optional**
+* Optional fields can be completely omitted from input
+
+## Enums for Controlled Values
+
+Use enums when you have a fixed set of allowed values:
+
+```elixir
+# Product schema with enum
+product_schema = Schema.new(%{
+  name: %{
+    type: :string,
+    required: true
+  },
+  category: %{
+    type: {:enum, ["electronics", "clothing", "home", "sports"]},
+    required: true,
+    description: "Product category from predefined list"
+  },
+  status: %{
+    type: {:enum, ["draft", "published", "archived"]},
+    required: true
+  }
+})
+
+# Valid product
+valid_product = %{
+  "name" => "Laptop",
+  "category" => "electronics",
+  "status" => "published"
+}
+
+# Invalid product - wrong category
+invalid_product = %{
+  "name" => "Mystery Item",
+  "category" => "unknown",
+  # Not in the enum!
+  "status" => "published"
+}
+
+IO.puts("Valid product:")
+IO.inspect(Spec.validate(product_schema, valid_product))
+
+IO.puts("\nInvalid product:")
+{:error, diag} = Spec.validate(product_schema, invalid_product)
+Enum.each(diag.errors, &IO.puts("  • #{&1.message}"))
+```
+
+### ✨ Enum Benefits
+
+* **Type safety**: Only predefined values are accepted
+* **Clear errors**: Shows all allowed values in error messages
+* **Documentation**: Enum values document valid options
+
+## Working with Arrays
+
+Arrays let you validate lists of items:
+
+```elixir
+# Blog post schema with tags array
+blog_schema = Schema.new(%{
+  title: %{
+    type: :string,
+    required: true,
+    min_length: 5,
+    max_length: 100
+  },
+  tags: %{
+    type: {:array, %{type: :string, min_length: 2, max_length: 20}},
+    required: true,
+    min_items: 1,
+    max_items: 5,
+    unique_items: true,
+    description: "1-5 unique tags, each 2-20 characters"
+  }
+})
+
+# Valid blog post
+valid_blog = %{
+  "title" => "Getting Started with ExOutlines",
+  "tags" => ["elixir", "tutorial", "llm"]
+}
+
+# Invalid - duplicate tags
+invalid_blog = %{
+  "title" => "My Blog Post",
+  "tags" => ["elixir", "tutorial", "elixir"]
+  # Duplicate!
+}
+
+IO.puts("Valid blog:")
+IO.inspect(Spec.validate(blog_schema, valid_blog))
+
+IO.puts("\nInvalid blog (duplicate tags):")
+{:error, diag} = Spec.validate(blog_schema, invalid_blog)
+Enum.each(diag.errors, &IO.puts("  • #{&1.message}"))
+```
+
+### 🔢 Array Constraints
+
+* **min_items**: Minimum array length
+* **max_items**: Maximum array length
+* **unique_items**: All items must be unique
+* **Item constraints**: Each item is validated (lengths, patterns, etc.)
+
+## JSON Schema for LLMs
+
+ExOutlines generates JSON Schema to send to LLMs:
+
+```elixir
+# Create a schema
+task_schema = Schema.new(%{
+  task: %{type: :string, required: true, min_length: 10},
+  priority: %{type: {:enum, ["low", "medium", "high"]}, required: true},
+  tags: %{type: {:array, %{type: :string}}, max_items: 3}
+})
+
+# Generate JSON Schema
+json_schema = Spec.to_schema(task_schema)
+
+IO.puts("JSON Schema for LLM:")
+IO.inspect(json_schema, pretty: true, limit: :infinity)
+```
+
+### 🤖 How It Works
+
+1. Define your schema in Elixir
+2. ExOutlines generates JSON Schema
+3. Send JSON Schema to LLM in prompt
+4. LLM returns structured JSON
+5. ExOutlines validates and repairs if needed
+
+## The Retry-Repair Loop
+
+```mermaid
+graph TD
+    A[User Schema] --> B[Generate JSON Schema]
+    B --> C[Send to LLM]
+    C --> D[LLM Returns JSON]
+    D --> E{Validate}
+    E -->|Valid| F[Return Data]
+    E -->|Invalid| G[Generate Error Feedback]
+    G --> H{Max Retries?}
+    H -->|No| C
+    H -->|Yes| I[Return Error]
+
+    style F fill:#90EE90
+    style I fill:#FFB6C6
+```
+
+When LLM output fails validation:
+
+1. **Error Feedback**: Specific validation errors sent back to LLM
+2. **Retry**: LLM attempts to fix the issues
+3. **Validate Again**: Check if fixes worked
+4. **Repeat**: Up to max_retries (default: 3)
+
+This makes LLM integrations **robust and self-correcting**.
+
+## Testing with Mock Backend
+
+For testing without an LLM, use the Mock backend:
+
+```elixir
+alias ExOutlines.Backend.Mock
+
+# Create a simple schema
+simple_schema = Schema.new(%{
+  greeting: %{type: :string, required: true}
+})
+
+# Mock LLM response
+mock_response = ~s({"greeting": "Hello, World!"})
+mock = Mock.new([{:ok, mock_response}])
+
+# Generate with Mock backend
+result =
+  ExOutlines.generate(
+    simple_schema,
+    backend: Mock,
+    backend_opts: [mock: mock]
+  )
+
+IO.puts("Mock backend result:")
+IO.inspect(result)
+```
+
+### 🧪 Why Mock?
+
+* **Fast**: No network calls
+* **Deterministic**: Predictable outputs for testing
+* **Free**: No API costs
+* **Reliable**: Works offline
+
+## Building a Complete Example
+
+Let's build a movie review analyzer:
+
+```elixir
+# Movie review schema
+movie_review_schema = Schema.new(%{
+  title: %{
+    type: :string,
+    required: true,
+    min_length: 1,
+    max_length: 100
+  },
+  rating: %{
+    type: :integer,
+    required: true,
+    min: 1,
+    max: 5,
+    description: "Star rating from 1-5"
+  },
+  sentiment: %{
+    type: {:enum, ["positive", "neutral", "negative"]},
+    required: true
+  },
+  genres: %{
+    type: {:array, %{type: {:enum, ["action", "comedy", "drama", "scifi", "horror"]}}},
+    required: true,
+    min_items: 1,
+    max_items: 3,
+    unique_items: true
+  },
+  summary: %{
+    type: :string,
+    required: true,
+    min_length: 50,
+    max_length: 200
+  },
+  would_recommend: %{
+    type: :boolean,
+    required: true
+  }
+})
+
+# Test with valid data
+review = %{
+  "title" => "The Matrix",
+  "rating" => 5,
+  "sentiment" => "positive",
+  "genres" => ["action", "scifi"],
+  "summary" =>
+    "A groundbreaking science fiction film that redefined action cinema with innovative visual effects and deep philosophical themes.",
+  "would_recommend" => true
+}
+
+case Spec.validate(movie_review_schema, review) do
+  {:ok, validated} ->
+    IO.puts("✅ Movie review validated!")
+    IO.puts("\nReview Details:")
+    IO.puts("  Title: #{validated.title}")
+    IO.puts("  Rating: #{String.duplicate("⭐", validated.rating)}")
+    IO.puts("  Sentiment: #{validated.sentiment}")
+    IO.puts("  Genres: #{Enum.join(validated.genres, ", ")}")
+    IO.puts("  Would Recommend: #{if validated.would_recommend, do: "Yes", else: "No"}")
+    IO.puts("\n  Summary: #{validated.summary}")
+
+  {:error, diagnostics} ->
+    IO.puts("❌ Validation failed:")
+    Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
+end
+```
+
+### 🎬 Exercise: Your Turn!
+
+Create a review for your favorite movie and validate it with the schema above. Try both valid and invalid data!
+
+## Pattern Matching with Regex
+
+Validate string formats with regular expressions:
+
+```elixir
+# Contact schema with format validation
+contact_schema = Schema.new(%{
+  name: %{
+    type: :string,
+    required: true
+  },
+  email: %{
+    type: :string,
+    required: true,
+    format: :email,
+    # Built-in email format
+    description: "Valid email address"
+  },
+  phone: %{
+    type: :string,
+    required: false,
+    pattern: ~r/^\d{3}-\d{3}-\d{4}$/,
+    # Custom pattern
+    description: "Phone in format: 555-123-4567"
+  },
+  website: %{
+    type: :string,
+    required: false,
+    format: :url,
+    # Built-in URL format
+    description: "Website URL"
+  }
+})
+
+# Valid contact
+valid_contact = %{
+  "name" => "Alice Johnson",
+  "email" => "alice@example.com",
+  "phone" => "555-123-4567",
+  "website" => "https://alice.dev"
+}
+
+# Invalid contact - bad formats
+invalid_contact = %{
+  "name" => "Bob Smith",
+  "email" => "not-an-email",
+  "phone" => "5551234567",
+  # Missing dashes
+  "website" => "not a url"
+}
+
+IO.puts("Valid contact:")
+IO.inspect(Spec.validate(contact_schema, valid_contact))
+
+IO.puts("\nInvalid contact:")
+{:error, diag} = Spec.validate(contact_schema, invalid_contact)
+Enum.each(diag.errors, &IO.puts("  • #{&1.message}"))
+```
+
+### 📋 Built-in Formats
+
+ExOutlines includes common format validators:
+
+* `:email` - Email addresses
+* `:url` - HTTP/HTTPS URLs
+* `:uuid` - UUID format
+* `:phone` - Phone numbers
+* `:date` - YYYY-MM-DD dates
+
+You can also use **custom regex patterns** for specific formats!
+
+## Key Takeaways
+
+Congratulations! 🎉 You've learned the fundamentals of ExOutlines:
+
+* ✅ **Schemas**: Define expected data structure
+* ✅ **Constraints**: Enforce length, range, and format rules
+* ✅ **Required/Optional**: Control which fields are mandatory
+* ✅ **Enums**: Restrict values to predefined options
+* ✅ **Arrays**: Validate lists with item constraints
+* ✅ **Validation**: Check data and get detailed errors
+* ✅ **Mock Backend**: Test without LLM API calls
+* ✅ **Retry-Repair**: Automatic error correction with LLMs
+
+### 📚 Next Steps
+
+Ready for more advanced topics? Check out:
+
+* **Advanced Patterns Livebook**: Nested objects, union types, complex schemas
+* **Examples**: See `examples/` directory for production use cases
+* **Documentation**: Full API docs at hexdocs.pm
+
+### 🤔 Questions?
+
+* GitHub Issues: [github.com/your-org/ex_outlines/issues](https://github.com/your-org/ex_outlines/issues)
+* Community: Join discussions and share your projects!
+
+Happy coding! 🚀
