@@ -110,7 +110,7 @@ if Code.ensure_loaded?(Ecto) do
     This allows reusing existing Ecto schemas without duplication.
     """
 
-    alias ExOutlines.{Spec.Schema, Diagnostics}
+    alias ExOutlines.{Diagnostics, Spec.Schema}
 
     @doc """
     Validates data using Ecto-enhanced validation when available.
@@ -556,20 +556,21 @@ if Code.ensure_loaded?(Ecto) do
       required_fields = extract_required_fields(changeset)
 
       # Group validations by field
-      field_rules = validations
-      |> Enum.group_by(fn {field, _validation} -> field end, fn {_field, validation} ->
-        validation
-      end)
-      |> Enum.map(fn {field, field_validations} ->
-        rules =
-          field_validations
-          |> Enum.reduce(%{}, fn validation, acc ->
-            merge_validation_rule(acc, validation)
-          end)
+      field_rules =
+        validations
+        |> Enum.group_by(fn {field, _validation} -> field end, fn {_field, validation} ->
+          validation
+        end)
+        |> Enum.map(fn {field, field_validations} ->
+          rules =
+            field_validations
+            |> Enum.reduce(%{}, fn validation, acc ->
+              merge_validation_rule(acc, validation)
+            end)
 
-        {field, rules}
-      end)
-      |> Enum.into(%{})
+          {field, rules}
+        end)
+        |> Enum.into(%{})
 
       # Merge required fields
       required_fields
