@@ -423,7 +423,7 @@ Some steps add:
 | 2. Integer Min/Max | ✅ Complete | 229 | min/max for integers and numbers |
 | 3. Array Validation | ✅ Complete | 249 | Arrays with item validation |
 | 4. Nested Objects | ✅ Complete | 262 | Recursive validation with paths |
-| 5. Regex Patterns | ⏳ Pending | - | - |
+| 5. Regex Patterns | ✅ Complete | 211 | Pattern and format validation |
 | 6. Union Types | ⏳ Pending | - | - |
 | 7. E-commerce Example | ⏳ Pending | - | - |
 | 8. Support Triage Example | ⏳ Pending | - | - |
@@ -437,4 +437,4 @@ Some steps add:
 
 ---
 
-**Last Updated:** 2026-01-27
+**Last Updated:** 2026-01-28
