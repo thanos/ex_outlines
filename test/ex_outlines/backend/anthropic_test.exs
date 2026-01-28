@@ -2,6 +2,7 @@ defmodule ExOutlines.Backend.AnthropicTest do
   use ExUnit.Case, async: true
 
   alias ExOutlines.Backend.Anthropic
+  alias ExOutlines.Spec.Schema
 
   describe "configuration validation" do
     test "requires api_key" do
@@ -12,10 +13,10 @@ defmodule ExOutlines.Backend.AnthropicTest do
     end
 
     test "validates api_key is a string" do
-      opts = [api_key: 12345]
+      opts = [api_key: 12_345]
       result = Anthropic.call_llm([], opts)
 
-      assert {:error, {:invalid_api_key, 12345}} = result
+      assert {:error, {:invalid_api_key, 12_345}} = result
     end
 
     test "validates model is a string" do
@@ -141,7 +142,7 @@ defmodule ExOutlines.Backend.AnthropicTest do
       # In real usage, you would provide a valid API key
 
       schema =
-        ExOutlines.Spec.Schema.new(%{
+        Schema.new(%{
           name: %{type: :string, required: true}
         })
 
@@ -160,7 +161,7 @@ defmodule ExOutlines.Backend.AnthropicTest do
 
     test "accepts all configuration options" do
       schema =
-        ExOutlines.Spec.Schema.new(%{
+        Schema.new(%{
           name: %{type: :string, required: true}
         })
 
