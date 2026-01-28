@@ -87,9 +87,11 @@ defmodule ExOutlines.Spec.Schema do
           | :integer
           | :boolean
           | :number
+          | :null
           | {:enum, [any()]}
           | {:array, item_spec()}
           | {:object, t()}
+          | {:union, [field_spec()]}
 
   @type format :: :email | :url | :uuid | :phone | :date
 
@@ -418,6 +420,24 @@ defmodule ExOutlines.Spec.Schema do
       add_description(base, spec)
     end
 
+    defp field_to_json_schema(%{type: :null} = spec) do
+      base = %{type: "null"}
+      add_description(base, spec)
+    end
+
+    defp field_to_json_schema(%{type: {:union, type_specs}} = spec) do
+      # Generate JSON Schema for each type in the union
+      one_of =
+        Enum.map(type_specs, fn type_spec ->
+          # Convert each type spec to a mini field spec without description
+          mini_spec = Map.delete(type_spec, :description)
+          field_to_json_schema(mini_spec)
+        end)
+
+      base = %{oneOf: one_of}
+      add_description(base, spec)
+    end
+
     defp item_spec_to_json_schema(%{type: :string} = spec) do
       base = %{type: "string"}
 
@@ -689,6 +709,112 @@ defmodule ExOutlines.Spec.Schema do
         }
       ]
     end
+
+    # Null type validation
+    defp validate_field_type(_name, %{type: :null}, nil), do: []
+
+    defp validate_field_type(name, %{type: :null}, value) do
+      [
+        %{
+          field: to_string(name),
+          expected: "null",
+          got: value,
+          message: "Field '#{name}' must be null"
+        }
+      ]
+    end
+
+    # Union type validation - try each type in order
+    defp validate_field_type(name, %{type: {:union, type_specs}}, value) do
+      # Try to validate against each type spec
+      results =
+        Enum.map(type_specs, fn spec ->
+          # Create a temporary field spec and validate
+          temp_spec = Map.merge(%{required: false}, spec)
+          validate_field_type(name, temp_spec, value)
+        end)
+
+      # Find first successful validation (empty error list)
+      case Enum.find(results, &(&1 == [])) do
+        [] ->
+          # Success! One type matched
+          []
+
+        nil ->
+          # All failed - build combined error message
+          type_descriptions = Enum.map(type_specs, &describe_type_spec/1)
+          types_list = Enum.join(type_descriptions, "\n - ")
+
+          message =
+            """
+            Field '#{name}' must match one of the following types:
+             - #{types_list}
+            Got: #{inspect(value)} which failed all validations
+            """
+            |> String.trim()
+
+          [
+            %{
+              field: to_string(name),
+              expected: "one of multiple types",
+              got: value,
+              message: message
+            }
+          ]
+      end
+    end
+
+    # Generate human-readable description of a type spec for error messages
+    defp describe_type_spec(%{type: :null}), do: "Null"
+
+    defp describe_type_spec(%{type: :string, pattern: pattern}) when not is_nil(pattern),
+      do: "String matching pattern #{inspect(pattern)}"
+
+    defp describe_type_spec(%{type: :string, format: format}) when not is_nil(format),
+      do: "String with #{format} format"
+
+    defp describe_type_spec(%{type: :string, min_length: min, max_length: max})
+         when not is_nil(min) and not is_nil(max),
+         do: "String with length between #{min} and #{max}"
+
+    defp describe_type_spec(%{type: :string, min_length: min}) when not is_nil(min),
+      do: "String with minimum length #{min}"
+
+    defp describe_type_spec(%{type: :string, max_length: max}) when not is_nil(max),
+      do: "String with maximum length #{max}"
+
+    defp describe_type_spec(%{type: :string}), do: "String"
+    defp describe_type_spec(%{type: :integer, positive: true}), do: "Positive integer (> 0)"
+
+    defp describe_type_spec(%{type: :integer, min: min, max: max})
+         when not is_nil(min) and not is_nil(max),
+         do: "Integer between #{min} and #{max}"
+
+    defp describe_type_spec(%{type: :integer, min: min}) when not is_nil(min),
+      do: "Integer >= #{min}"
+
+    defp describe_type_spec(%{type: :integer, max: max}) when not is_nil(max),
+      do: "Integer <= #{max}"
+
+    defp describe_type_spec(%{type: :integer}), do: "Integer"
+    defp describe_type_spec(%{type: :boolean}), do: "Boolean"
+
+    defp describe_type_spec(%{type: :number, min: min, max: max})
+         when not is_nil(min) and not is_nil(max),
+         do: "Number between #{min} and #{max}"
+
+    defp describe_type_spec(%{type: :number, min: min}) when not is_nil(min),
+      do: "Number >= #{min}"
+
+    defp describe_type_spec(%{type: :number, max: max}) when not is_nil(max),
+      do: "Number <= #{max}"
+
+    defp describe_type_spec(%{type: :number}), do: "Number"
+    defp describe_type_spec(%{type: {:enum, values}}), do: "One of: #{inspect(values)}"
+    defp describe_type_spec(%{type: {:array, _}}), do: "Array"
+    defp describe_type_spec(%{type: {:object, _}}), do: "Object"
+    defp describe_type_spec(%{type: {:union, _}}), do: "Union type"
+    defp describe_type_spec(_), do: "Unknown type"
 
     defp validate_integer_constraints(name, spec, value) do
       errors = []
@@ -970,28 +1096,42 @@ defmodule ExOutlines.Spec.Schema do
     defp validate_array_item(array_name, index, item_spec, item) do
       # Create a temporary field name with index for error messages
       field_name = "#{array_name}[#{index}]"
+      type = Map.get(item_spec, :type)
 
-      # Validate the item using the item_spec
-      case Map.get(item_spec, :type) do
-        :string ->
-          validate_string_item(field_name, item_spec, item)
-
-        :integer ->
-          validate_integer_item(field_name, item_spec, item)
-
-        :number ->
-          validate_number_item(field_name, item_spec, item)
-
-        :boolean ->
-          validate_boolean_item(field_name, item)
-
-        {:enum, allowed_values} ->
-          validate_enum_item(field_name, allowed_values, item)
-
-        _ ->
-          []
-      end
+      # Dispatch to appropriate validator based on type
+      validate_array_item_by_type(type, field_name, item_spec, item)
     end
+
+    # Simple type validators for array items
+    defp validate_array_item_by_type(:string, field_name, item_spec, item),
+      do: validate_string_item(field_name, item_spec, item)
+
+    defp validate_array_item_by_type(:integer, field_name, item_spec, item),
+      do: validate_integer_item(field_name, item_spec, item)
+
+    defp validate_array_item_by_type(:number, field_name, item_spec, item),
+      do: validate_number_item(field_name, item_spec, item)
+
+    defp validate_array_item_by_type(:boolean, field_name, _item_spec, item),
+      do: validate_boolean_item(field_name, item)
+
+    defp validate_array_item_by_type({:enum, allowed_values}, field_name, _item_spec, item),
+      do: validate_enum_item(field_name, allowed_values, item)
+
+    # Complex types use general validate_field_type
+    defp validate_array_item_by_type({:union, _}, field_name, item_spec, item),
+      do: validate_field_type(field_name, item_spec, item)
+
+    defp validate_array_item_by_type({:object, _}, field_name, item_spec, item),
+      do: validate_field_type(field_name, item_spec, item)
+
+    defp validate_array_item_by_type({:array, _}, field_name, item_spec, item),
+      do: validate_field_type(field_name, item_spec, item)
+
+    defp validate_array_item_by_type(:null, field_name, item_spec, item),
+      do: validate_field_type(field_name, item_spec, item)
+
+    defp validate_array_item_by_type(_, _field_name, _item_spec, _item), do: []
 
     defp validate_string_item(field_name, item_spec, item) when is_binary(item) do
       validate_string_constraints(field_name, item_spec, item)
