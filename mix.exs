@@ -73,7 +73,7 @@ defmodule ExOutlines.MixProject do
   defp docs do
     [
       main: "ExOutlines",
-      extras: ["README.md", "CHANGELOG.md"]
+      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
     ]
   end
 end
