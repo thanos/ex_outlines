@@ -12,7 +12,6 @@ defmodule ExOutlines.Spec.Schema do
   - `:number` - Numeric values (integer or float)
   - `{:enum, values}` - Enumerated values from a list
   - `{:array, item_spec}` - Array/list of items with validation
-  - `{:object, Schema.t()}` - Nested object with recursive validation
 
   ## Field Specification
 
