@@ -73,6 +73,8 @@ defmodule ExOutlines.Spec.Schema do
   @phone_pattern ~r/^\d{3}-\d{3}-\d{4}$/
   @date_pattern ~r/^\d{4}-\d{2}-\d{2}$/
 
+  @type format :: :email | :url | :uuid | :phone | :date
+
   @type item_spec :: %{
           type: :string | :integer | :boolean | :number | {:enum, [any()]},
           min_length: non_neg_integer() | nil,
