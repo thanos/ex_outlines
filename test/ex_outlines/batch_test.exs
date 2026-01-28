@@ -1,8 +1,8 @@
 defmodule ExOutlines.BatchTest do
   use ExUnit.Case, async: false
 
-  alias ExOutlines.Spec.Schema
   alias ExOutlines.Backend.Mock
+  alias ExOutlines.Spec.Schema
 
   setup do
     # Attach telemetry handler to capture events
@@ -272,15 +272,17 @@ defmodule ExOutlines.BatchTest do
     end
 
     test "supports different schemas in same batch" do
-      user_schema = Schema.new(%{
-        name: %{type: :string, required: true},
-        age: %{type: :integer, required: true}
-      })
+      user_schema =
+        Schema.new(%{
+          name: %{type: :string, required: true},
+          age: %{type: :integer, required: true}
+        })
 
-      product_schema = Schema.new(%{
-        title: %{type: :string, required: true},
-        price: %{type: :number, required: true}
-      })
+      product_schema =
+        Schema.new(%{
+          title: %{type: :string, required: true},
+          price: %{type: :number, required: true}
+        })
 
       user_mock = Mock.new([{:ok, ~s({"name": "Alice", "age": 30})}])
       product_mock = Mock.new([{:ok, ~s({"title": "Book", "price": 19.99})}])

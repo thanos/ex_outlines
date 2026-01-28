@@ -55,7 +55,8 @@ defmodule ExOutlines.Spec.Schema do
           max: number() | nil
         }
 
-  @type field_type :: :string | :integer | :boolean | :number | {:enum, [any()]} | {:array, item_spec()}
+  @type field_type ::
+          :string | :integer | :boolean | :number | {:enum, [any()]} | {:array, item_spec()}
 
   @type field_spec :: %{
           type: field_type(),
