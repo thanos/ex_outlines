@@ -11,6 +11,7 @@ defmodule ExOutlines.Spec.Schema do
   - `:boolean` - Boolean values (true/false)
   - `:number` - Numeric values (integer or float)
   - `{:enum, values}` - Enumerated values from a list
+  - `{:array, item_spec}` - Array/list of items with validation
 
   ## Field Specification
 
@@ -46,7 +47,15 @@ defmodule ExOutlines.Spec.Schema do
 
   alias ExOutlines.Diagnostics
 
-  @type field_type :: :string | :integer | :boolean | :number | {:enum, [any()]}
+  @type item_spec :: %{
+          type: :string | :integer | :boolean | :number | {:enum, [any()]},
+          min_length: non_neg_integer() | nil,
+          max_length: pos_integer() | nil,
+          min: number() | nil,
+          max: number() | nil
+        }
+
+  @type field_type :: :string | :integer | :boolean | :number | {:enum, [any()]} | {:array, item_spec()}
 
   @type field_spec :: %{
           type: field_type(),
@@ -56,7 +65,10 @@ defmodule ExOutlines.Spec.Schema do
           min_length: non_neg_integer() | nil,
           max_length: pos_integer() | nil,
           min: number() | nil,
-          max: number() | nil
+          max: number() | nil,
+          min_items: non_neg_integer() | nil,
+          max_items: pos_integer() | nil,
+          unique_items: boolean()
         }
 
   @type t :: %__MODULE__{
@@ -107,7 +119,10 @@ defmodule ExOutlines.Spec.Schema do
       min_length: Keyword.get(opts, :min_length),
       max_length: Keyword.get(opts, :max_length),
       min: Keyword.get(opts, :min),
-      max: Keyword.get(opts, :max)
+      max: Keyword.get(opts, :max),
+      min_items: Keyword.get(opts, :min_items),
+      max_items: Keyword.get(opts, :max_items),
+      unique_items: Keyword.get(opts, :unique_items, false)
     }
 
     %{schema | fields: Map.put(fields, name, field_spec)}
@@ -144,7 +159,10 @@ defmodule ExOutlines.Spec.Schema do
       min_length: Map.get(spec, :min_length),
       max_length: Map.get(spec, :max_length),
       min: Map.get(spec, :min),
-      max: Map.get(spec, :max)
+      max: Map.get(spec, :max),
+      min_items: Map.get(spec, :min_items),
+      max_items: Map.get(spec, :max_items),
+      unique_items: Map.get(spec, :unique_items, false)
     }
   end
 
