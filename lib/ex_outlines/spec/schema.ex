@@ -496,6 +496,23 @@ defmodule ExOutlines.Spec.Schema do
       %{enum: values}
     end
 
+    defp item_spec_to_json_schema(%{type: {:object, nested_schema}}) do
+      # Recursively generate JSON Schema for nested object in array
+      nested_json_schema = ExOutlines.Spec.to_schema(nested_schema)
+
+      base = %{
+        type: "object",
+        properties: nested_json_schema.properties
+      }
+
+      # Add required fields if present
+      if Map.has_key?(nested_json_schema, :required) do
+        Map.put(base, :required, nested_json_schema.required)
+      else
+        base
+      end
+    end
+
     defp add_description(schema, %{description: desc}) when is_binary(desc) do
       Map.put(schema, :description, desc)
     end
@@ -518,8 +535,9 @@ defmodule ExOutlines.Spec.Schema do
         map
     end
 
-    # Recursively normalize nested maps
+    # Recursively normalize nested maps and arrays
     defp normalize_value(value) when is_map(value), do: normalize_keys(value)
+    defp normalize_value(value) when is_list(value), do: Enum.map(value, &normalize_value/1)
     defp normalize_value(value), do: value
 
     defp validate_all_fields(fields, value) do

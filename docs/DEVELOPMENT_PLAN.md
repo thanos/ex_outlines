@@ -428,12 +428,12 @@ Some steps add:
 | 7. E-commerce Example | ✅ Complete | 223 | Product categorization example |
 | 8. Support Triage Example | ✅ Complete | 223 | Ticket triage and routing |
 | 9. Document Extraction Example | ✅ Complete | 223 | Bibliographic metadata extraction |
-| 10. Getting Started Livebook | ✅ Complete | 223 | Interactive tutorial notebook |
-| 11. Advanced Patterns Livebook | ✅ Complete | 223 | Advanced features notebook |
-| 12. Anthropic Backend | ✅ Complete | 243 | Native Anthropic Claude API backend |
-| 13. Batch Processing | ✅ Complete | 261 | Concurrent batch processing with Task.async_stream |
-| 14. How-To Guides | ✅ Complete | 229 | Phoenix, Testing, Error Handling guides |
-| 15. Benchmarks | ✅ Complete | 288 | Benchee suite with 39 scenarios across 3 benchmarks |
+| 10. Getting Started Livebook | ⏳ Pending | - | - |
+| 11. Advanced Patterns Livebook | ⏳ Pending | - | - |
+| 12. Anthropic Backend | ⏳ Pending | - | - |
+| 13. Batch Processing | ⏳ Pending | - | - |
+| 14. How-To Guides | ⏳ Pending | - | - |
+| 15. Benchmarks | ⏳ Pending | - | - |
 
 ---
 
