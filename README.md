@@ -75,7 +75,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ex_outlines, "~> 0.2.0"}
+    {:ex_outlines, "~> 0.1.0"}
   ]
 end
 ```
@@ -85,7 +85,7 @@ Optional: Add Ecto for schema adapter:
 ```elixir
 def deps do
   [
-    {:ex_outlines, "~> 0.2.0"},
+    {:ex_outlines, "~> 0.1.0"},
     {:ecto, "~> 3.11"}  # Optional
   ]
 end
@@ -569,14 +569,18 @@ Both tools serve different ecosystems and constraints.
 
 ## Next Steps
 
-Active development priorities for closing the gap with Python Outlines:
+Active development priorities for v0.2.0:
 
-- **String Length Constraints** - Add min_length and max_length for string validation
-- **Integer Min/Max Constraints** - Extend numeric validation beyond positive-only checks
-- **Array Validation** - Support arrays with item schemas and constraint validation
-- **Nested Object Support** - Enable recursive validation of nested object structures
-- **Regular Expression Patterns** - Add regex pattern matching for formatted strings
-- **Union Types** - Support fields that accept multiple type options
+1. **Google Gemini Backend** (Complete) - Native Google Gemini API support for fast, cost-effective generation
+2. **EEx Template Integration** - Reusable prompt templates with variable interpolation using Elixir's built-in EEx
+3. **Streaming Support** - Real-time generation with incremental validation for responsive UIs and LiveView
+4. **Vision Model Support** - Multimodal image input for structured data extraction from invoices and documents
+5. **Ollama Native Backend** - Local model support for privacy-focused and cost-free generation
+6. **Bumblebee Integration** - Run Transformers models locally within the BEAM for offline generation
+7. **Advanced Numeric Constraints** - Add exclusive min/max and multipleOf constraints from JSON Schema
+8. **Tuple Type Support** - Fixed-length arrays with different types per position for precise validation
+9. **Conditional Fields** - Schema dependencies and conditional requirements for complex validation logic
+10. **Production Examples** - Expand example library with legal, medical, financial, and code analysis use cases
 
 ## Roadmap
 
@@ -586,7 +590,7 @@ Active development priorities for closing the gap with Python Outlines:
 - [ ] Streaming support (incremental validation)
 - [ ] Generator abstraction (reusable model + schema)
 - [ ] Additional backends (Ollama, vLLM)
-- [x] 15 comprehensive Livebook tutorials (completed in v0.2)
+- [x] 14 comprehensive Livebook tutorials (completed in v0.1)
 
 ### v0.4+ (Future)
 

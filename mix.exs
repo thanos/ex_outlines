@@ -137,8 +137,8 @@ defmodule ExOutlines.MixProject do
 
       # Reference
       "DOCUMENTATION_INDEX.md": [title: "Documentation Index"],
-      "GAP_ANALYSIS.md": [title: "Gap Analysis vs Python Outlines"],
-      "GITHUB_ANALYSIS_SUMMARY.md": [title: "GitHub Analysis Summary"]
+      "GAP_ANALYSIS.md": [title: "Gap Analysis vs Python Outlines"]
+      # "GITHUB_ANALYSIS_SUMMARY.md": [title: "GitHub Analysis Summary"]
     ]
   end
 

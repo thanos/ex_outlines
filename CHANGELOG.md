@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-01-29
 
 Initial release of ExOutlines - deterministic structured output from LLMs via retry-repair loops.
 
@@ -87,6 +87,39 @@ Initial release of ExOutlines - deterministic structured output from LLMs via re
 - Inline documentation with doctests
 - Type specifications for all public functions
 - Usage examples and integration patterns
+- 11 comprehensive guides covering:
+  - Getting Started - Installation, basic usage, first schema
+  - Core Concepts - Deep dive into validation, retry-repair loop, backends
+  - Architecture - System design, module organization, extension points
+  - Schema Patterns - String, numeric, array, nested object patterns
+  - Phoenix Integration - Controllers, LiveView, Oban, caching strategies
+  - Ecto Schema Adapter - Automatic Ecto schema conversion
+  - Testing Strategies - Unit, integration, property-based testing
+  - Error Handling - Diagnostics, retry strategies, graceful degradation
+  - Batch Processing - Concurrent generation, configuration, telemetry
+  - Guides README - Complete guide index and learning paths
+- 14 interactive Livebook tutorials covering:
+  - Getting Started - Introduction to ExOutlines fundamentals
+  - Named Entity Extraction - Extract structured entities from text
+  - Dating Profile Generation - Creative content with EEx templates
+  - Question Answering with Citations - Build trustworthy Q&A systems
+  - Sampling and Self-Consistency - Multi-sample generation strategies
+  - Models Playing Chess - Constrained move generation game
+  - SimToM: Theory of Mind - Perspective-taking with Mermaid diagrams
+  - Chain of Thought - Step-by-step reasoning patterns
+  - ReAct Agent - Build agents with tool integration
+  - Structured Generation Workflow - Multi-stage pipelines
+  - PDF Reading - Extract data from PDFs with vision models
+  - Earnings Reports - Financial data extraction and analysis
+  - Receipt Digitization - Process receipt images for expenses
+  - Extract Event Details - Natural language to calendar events
+- 7 production-ready example scripts:
+  - Resume Parser - Extract structured data from resumes
+  - E-commerce Product Categorization - Product data extraction
+  - Customer Support Triage - Ticket classification and routing
+  - Document Metadata Extraction - Academic paper metadata
+  - Classification Example - Basic enum classification patterns
+  - Ecto Schema Adapter Example - Converting Ecto schemas
 
 ### Limitations (v0.1)
 
@@ -153,7 +186,7 @@ Future enhancements planned for v0.2+:
 
 ## Links
 
-- [GitHub Repository](https://github.com/your_org/ex_outlines)
+- [GitHub Repository](https://github.com/thanos/ex_outlines)
 - [Hex.pm Package](https://hex.pm/packages/ex_outlines)
 - [Documentation](https://hexdocs.pm/ex_outlines)
-- [Issue Tracker](https://github.com/your_org/ex_outlines/issues)
+- [Issue Tracker](https://github.com/thanos/ex_outlines/issues)
