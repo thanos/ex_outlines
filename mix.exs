@@ -89,7 +89,7 @@ defmodule ExOutlines.MixProject do
       # Root documentation
       "README.md": [title: "Overview"],
       "CHANGELOG.md": [title: "Changelog"],
-      "LICENSE": [title: "License"],
+      LICENSE: [title: "License"],
 
       # Getting started guides
       "guides/getting_started.md": [title: "Getting Started"],
@@ -115,7 +115,9 @@ defmodule ExOutlines.MixProject do
       "livebooks/named_entity_extraction.livemd": [title: "Livebook: Named Entity Extraction"],
       "livebooks/dating_profiles.livemd": [title: "Livebook: Dating Profiles"],
       "livebooks/qa_with_citations.livemd": [title: "Livebook: Q&A with Citations"],
-      "livebooks/sampling_and_self_consistency.livemd": [title: "Livebook: Sampling & Self-Consistency"],
+      "livebooks/sampling_and_self_consistency.livemd": [
+        title: "Livebook: Sampling & Self-Consistency"
+      ],
 
       # Livebook tutorials - Advanced
       "livebooks/models_playing_chess.livemd": [title: "Livebook: Models Playing Chess"],
@@ -144,10 +146,10 @@ defmodule ExOutlines.MixProject do
     [
       "Getting Started": ~r/guides\/(getting_started|core_concepts)/,
       "Core Guides": ~r/guides\/(schema_patterns|architecture|batch_processing)/,
-      "Integration": ~r/guides\/(phoenix_integration|ecto_schema_adapter)/,
+      Integration: ~r/guides\/(phoenix_integration|ecto_schema_adapter)/,
       "Best Practices": ~r/guides\/(testing_strategies|error_handling)/,
       "Livebook Tutorials": ~r/livebooks\//,
-      "Reference": ~r/(DOCUMENTATION_INDEX|GAP_ANALYSIS|GITHUB_ANALYSIS_SUMMARY)/,
+      Reference: ~r/(DOCUMENTATION_INDEX|GAP_ANALYSIS|GITHUB_ANALYSIS_SUMMARY)/,
       "Project Info": ~r/(README|CHANGELOG|LICENSE)/
     ]
   end
@@ -159,7 +161,7 @@ defmodule ExOutlines.MixProject do
         ExOutlines.Spec,
         ExOutlines.Spec.Schema
       ],
-      "Backends": [
+      Backends: [
         ExOutlines.Backend,
         ExOutlines.Backend.HTTP,
         ExOutlines.Backend.Anthropic,
