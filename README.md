@@ -428,7 +428,32 @@ Complete API documentation: [hexdocs.pm/ex_outlines](https://hexdocs.pm/ex_outli
 
 ### Interactive Tutorials
 
-Check `livebooks/` directory for hands-on Livebook tutorials (coming soon).
+15 comprehensive Livebook tutorials available in `livebooks/` directory:
+
+**Beginner Level:**
+- **[Getting Started](livebooks/getting_started.livemd)** - Introduction to ExOutlines fundamentals
+- **[Classification](livebooks/classification.livemd)** - Text classification with enums and confidence scoring
+
+**Intermediate Level:**
+- **[Named Entity Extraction](livebooks/named_entity_extraction.livemd)** - Extract structured entities from text
+- **[Dating Profile Generation](livebooks/dating_profiles.livemd)** - Creative content with EEx templates
+- **[Question Answering with Citations](livebooks/qa_with_citations.livemd)** - Build trustworthy Q&A systems
+- **[Sampling and Self-Consistency](livebooks/sampling_and_self_consistency.livemd)** - Multi-sample generation strategies
+
+**Advanced Level:**
+- **[Models Playing Chess](livebooks/models_playing_chess.livemd)** - Constrained move generation game
+- **[SimToM: Theory of Mind](livebooks/simtom_theory_of_mind.livemd)** - Perspective-taking with Mermaid diagrams
+- **[Chain of Thought](livebooks/chain_of_thought.livemd)** - Step-by-step reasoning patterns
+- **[ReAct Agent](livebooks/react_agent.livemd)** - Build agents with tool integration
+- **[Structured Generation Workflow](livebooks/structured_generation_workflow.livemd)** - Multi-stage pipelines
+
+**Vision & Document Processing:**
+- **[PDF Reading](livebooks/read_pdfs.livemd)** - Extract data from PDFs with vision models
+- **[Earnings Reports](livebooks/earnings_reports.livemd)** - Financial data extraction and analysis
+- **[Receipt Digitization](livebooks/receipt_digitization.livemd)** - Process receipt images for expenses
+- **[Extract Event Details](livebooks/extract_event_details.livemd)** - Natural language to calendar events
+
+Open with [Livebook](https://livebook.dev/) for interactive learning.
 
 ---
 
@@ -551,7 +576,7 @@ Both tools serve different ecosystems and constraints.
 - [ ] Streaming support (incremental validation)
 - [ ] Generator abstraction (reusable model + schema)
 - [ ] Additional backends (Ollama, vLLM)
-- [ ] More examples and Livebook tutorials
+- [x] 15 comprehensive Livebook tutorials (completed in v0.2)
 
 ### v0.4+ (Future)
 
