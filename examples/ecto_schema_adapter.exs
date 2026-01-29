@@ -20,21 +20,23 @@ defmodule Example do
   Example showing Ecto Schema Adapter usage.
   """
 
-  use Elixir.Ecto.Schema
-  import Elixir.Ecto.Changeset
+  use Ecto.Schema
+  import Ecto.Changeset
+
   alias ExOutlines.{Ecto, Backend.Mock, Spec}
 
   # Define an Ecto schema with validations
   defmodule User do
-    use Elixir.Ecto.Schema
-    import Elixir.Ecto.Changeset
+    use Ecto.Schema
+    import Ecto.Changeset
 
     schema "users" do
       field(:email, :string)
       field(:username, :string)
       field(:age, :integer)
       field(:bio, :string)
-      field(:role, Elixir.Ecto.Enum, values: [:admin, :user, :guest])
+
+      field(:role, Ecto.Enum, values: [:admin, :user, :guest])
     end
 
     @doc """
@@ -52,11 +54,11 @@ defmodule Example do
   end
 
   defmodule Product do
-    use Elixir.Ecto.Schema
-    import Elixir.Ecto.Changeset
+    use Ecto.Schema
+    import Ecto.Changeset
 
     defmodule Price do
-      use Elixir.Ecto.Schema
+      use Ecto.Schema
 
       embedded_schema do
         field(:amount, :decimal)
