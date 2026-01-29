@@ -693,7 +693,7 @@ json(conn, %{error: ErrorFormatter.format_error(reason).message})
 
 - [Phoenix Integration](phoenix_integration.md) - Handle errors in web context
 - [Testing Strategies](testing_strategies.md) - Test error scenarios
-- [Performance Optimization](performance_optimization.md) - Optimize for reliability
+- [Batch Processing](batch_processing.md) - Handle errors in concurrent operations
 
 ## Further Reading
 

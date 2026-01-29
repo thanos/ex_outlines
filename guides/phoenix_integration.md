@@ -554,7 +554,7 @@ end
 
 - [Testing Strategies](testing_strategies.md) - Test your Phoenix integration
 - [Error Handling](error_handling.md) - Advanced error handling patterns
-- [Performance Optimization](performance_optimization.md) - Optimize LLM usage
+- [Batch Processing](batch_processing.md) - Process multiple requests efficiently
 
 ## Further Reading
 

@@ -23,15 +23,6 @@ Introduction to ExOutlines for beginners. Learn the basics of schema creation, v
 
 ---
 
-#### classification.livemd
-Classify text into predefined categories using structured output generation.
-
-**Topics**: enums, classification schemas, confidence scoring
-
-**Duration**: 30-45 minutes
-
----
-
 ### Intermediate Level
 
 #### named_entity_extraction.livemd
@@ -371,7 +362,7 @@ To add a new notebook:
 
 ## Statistics
 
-- **Total notebooks**: 15
+- **Total notebooks**: 14
 - **Total lines of code and documentation**: ~11,000+
 - **Topics covered**: 25+
 - **Example schemas**: 60+

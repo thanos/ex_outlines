@@ -659,7 +659,7 @@ mock = mock_success(Factory.build(:analysis_result))
 
 - [Phoenix Integration](phoenix_integration.md) - Test your Phoenix integration
 - [Error Handling](error_handling.md) - Test error scenarios
-- [Performance Optimization](performance_optimization.md) - Benchmark your code
+- [Batch Processing](batch_processing.md) - Test concurrent operations
 
 ## Further Reading
 

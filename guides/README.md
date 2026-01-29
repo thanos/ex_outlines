@@ -319,8 +319,8 @@ Looking for complete example applications? Check out:
 - [GitHub Discussions](https://github.com/your-org/ex_outlines/discussions) - Questions and community support
 
 ### Examples
-- [Examples Directory](../examples/) - Production-ready examples
-- [Livebooks](../livebooks/) - Interactive tutorials
+- Examples Directory - Production-ready examples (see examples/ folder)
+- [Livebooks](../livebooks/README.md) - Interactive tutorials
 
 ## Contributing
 

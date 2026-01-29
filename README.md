@@ -428,11 +428,10 @@ Complete API documentation: [hexdocs.pm/ex_outlines](https://hexdocs.pm/ex_outli
 
 ### Interactive Tutorials
 
-15 comprehensive Livebook tutorials available in `livebooks/` directory:
+14 comprehensive Livebook tutorials available in `livebooks/` directory:
 
 **Beginner Level:**
 - **[Getting Started](livebooks/getting_started.livemd)** - Introduction to ExOutlines fundamentals
-- **[Classification](livebooks/classification.livemd)** - Text classification with enums and confidence scoring
 
 **Intermediate Level:**
 - **[Named Entity Extraction](livebooks/named_entity_extraction.livemd)** - Extract structured entities from text
