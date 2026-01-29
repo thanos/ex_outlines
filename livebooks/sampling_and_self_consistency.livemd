@@ -1,0 +1,545 @@
+# Sampling Techniques and Self-Consistency
+
+## Introduction
+
+Large Language Models (LLMs) are probabilistic systems that can generate multiple different outputs for the same prompt. By generating multiple samples and analyzing their distribution, we can:
+
+- **Assess model confidence**: High agreement across samples suggests certainty
+- **Improve accuracy**: Self-consistency sampling selects the most common answer
+- **Understand uncertainty**: Entropy quantifies prediction spread
+- **Debug prompts**: Divergent samples reveal ambiguity
+
+This Livebook demonstrates these techniques using Ex Outlines for structured generation.
+
+**Learning Objectives:**
+
+* Generate multiple samples from an LLM
+* Analyze answer distributions
+* Calculate entropy to measure uncertainty
+* Compare model performance (GPT-4o-mini vs GPT-4)
+* Apply self-consistency to improve accuracy
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with Ex Outlines (complete Getting Started guide)
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:req, "~> 0.4"},
+  {:kino, "~> 0.12"},
+  {:vega_lite, "~> 0.1"},
+  {:kino_vega_lite, "~> 0.1"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+alias VegaLite, as: Vl
+
+# Configuration - uses Livebook secrets
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+# Helper to create backend options
+defmodule Config do
+  def backend_opts(api_key, model) do
+    [
+      api_key: api_key,
+      model: model,
+      api_url: "https://api.openai.com/v1/chat/completions"
+    ]
+  end
+end
+
+:ok
+```
+
+## Understanding Sampling
+
+When an LLM generates text, it samples from a probability distribution over tokens. Key parameters:
+
+- **Temperature**: Controls randomness (0 = deterministic, 1 = creative, 2 = very random)
+- **Top-p**: Nucleus sampling threshold
+- **n**: Number of samples to generate
+
+**Question**: If the same prompt is sent multiple times, will the LLM give the same answer?
+
+**Answer**: Not always. Even with low temperature, slight variations occur. With higher temperature, diversity increases significantly.
+
+Let's explore this by generating multiple samples for the same question.
+
+## Prompt Templates with EEx
+
+Elixir's built-in EEx (Embedded Elixir) serves the same purpose as Python's Jinja2 for template generation.
+
+```elixir
+# Define a few-shot prompt template for math problems
+defmodule MathPromptTemplate do
+  require EEx
+
+  # Template string
+  @template """
+  You are a math tutor solving word problems step-by-step.
+
+  <%= for example <- @examples do %>
+  Q: <%= example.question %>
+  A: <%= example.answer %>
+
+  <% end %>
+  Q: <%= @question %>
+  A: Let's think step by step.
+  """
+
+  def render(examples, question) do
+    EEx.eval_string(@template, assigns: [examples: examples, question: question])
+  end
+end
+
+# Example problems (GSM8K-style)
+examples = [
+  %{
+    question: "Janet has 3 apples. She gives 2 to her friend. How many does she have left?",
+    answer: "Janet starts with 3 apples. She gives away 2 apples. 3 - 2 = 1. Janet has 1 apple left."
+  },
+  %{
+    question: "A box contains 24 pencils. If 4 students share them equally, how many pencils does each student get?",
+    answer: "There are 24 pencils total. 4 students share equally. 24 ÷ 4 = 6. Each student gets 6 pencils."
+  }
+]
+
+# Test question (tricky!)
+question = """
+When I was 6 years old, my sister was half my age.
+Now I'm 70 years old. How old is my sister?
+"""
+
+# Render the prompt
+prompt = MathPromptTemplate.render(examples, question)
+IO.puts(prompt)
+
+:ok
+```
+
+**Note**: This is a classic reasoning puzzle designed to reveal how models handle implicit time relationships.
+
+<!-- livebook:{"break_markdown":true} -->
+
+The correct answer is 67 years old. When you were 6, your sister was 3 (half your age), making her 3 years younger. Now that you're 70, she is 70 - 3 = 67 years old. Many models struggle with this temporal reasoning.
+
+## Multi-Sample Generation
+
+Now let's generate 20 different responses for the same question to see how the model's answers vary.
+
+```elixir
+# Define schema for structured math answers
+answer_schema =
+  Schema.new(%{
+    reasoning: %{
+      type: :string,
+      required: true,
+      description: "Step-by-step reasoning process"
+    },
+    final_answer: %{
+      type: :string,
+      required: true,
+      description: "The final numerical answer"
+    }
+  })
+
+# Function to generate N samples
+defmodule Sampler do
+  def generate_samples(schema, prompt, api_key, model, n) do
+    # Create tasks for concurrent generation
+    tasks =
+      for _i <- 1..n do
+        {schema,
+         [
+           backend: HTTP,
+           backend_opts: [
+             api_key: api_key,
+             model: model,
+             messages: [
+               %{role: "system", content: "You are a helpful math tutor."},
+               %{role: "user", content: prompt}
+             ]
+           ]
+         ]}
+      end
+
+    # Generate concurrently with batch processing
+    ExOutlines.generate_batch(tasks, max_concurrency: 5)
+  end
+end
+
+# Generate 20 samples
+IO.puts("Generating 20 samples... (this may take 30-60 seconds)")
+samples = Sampler.generate_samples(answer_schema, prompt, api_key, model, 20)
+
+# Show success rate
+success_count = Enum.count(samples, fn {status, _} -> status == :ok end)
+IO.puts("Successfully generated #{success_count}/#{length(samples)} samples")
+
+# Preview first 3 responses
+samples
+|> Enum.take(3)
+|> Enum.with_index(1)
+|> Enum.each(fn {{:ok, sample}, idx} ->
+  IO.puts("\n--- Sample #{idx} ---")
+  IO.puts("Final Answer: #{sample.final_answer}")
+  IO.puts("Reasoning: #{String.slice(sample.reasoning, 0, 100)}...")
+end)
+
+:ok
+```
+
+**Try it yourself**: Modify the temperature parameter in backend_opts to see how answer diversity changes. Add `temperature: 0.0` for deterministic outputs, or `temperature: 1.5` for creative variations.
+
+## Extracting Numerical Answers
+
+To analyze the distribution of answers, we need to extract just the numbers from the responses.
+
+```elixir
+defmodule AnswerExtractor do
+  @doc """
+  Extract numeric answers from text using regex.
+  Handles various formats: "67", "67 years old", "Answer: 67", etc.
+  """
+  def extract_number(text) when is_binary(text) do
+    case Regex.run(~r/\b(\d+)\b/, text) do
+      [_, number] -> String.to_integer(number)
+      nil -> nil
+    end
+  end
+
+  def extract_numbers_from_samples(samples) do
+    samples
+    |> Enum.map(fn
+      {:ok, sample} -> extract_number(sample.final_answer)
+      {:error, _} -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+end
+
+# Extract answers
+answers = AnswerExtractor.extract_numbers_from_samples(samples)
+
+IO.puts("Extracted #{length(answers)} numerical answers")
+IO.inspect(answers, label: "Answers")
+
+:ok
+```
+
+## Visualizing Answer Distribution
+
+Now we can visualize how the model's answers are distributed across different values.
+
+```elixir
+# Count answer frequencies
+answer_frequencies =
+  answers
+  |> Enum.frequencies()
+  |> Enum.sort_by(fn {_answer, count} -> -count end)
+  |> Enum.map(fn {answer, count} ->
+    %{answer: answer, count: count, percentage: count / length(answers) * 100}
+  end)
+
+# Display frequency table
+IO.puts("\n=== Answer Distribution ===")
+
+Enum.each(answer_frequencies, fn %{answer: ans, count: cnt, percentage: pct} ->
+  IO.puts("#{ans}: #{cnt} times (#{Float.round(pct, 1)}%)")
+end)
+
+:ok
+```
+
+```elixir
+# Create bar chart with VegaLite
+chart =
+  Vl.new(width: 600, height: 400, title: "Answer Distribution")
+  |> Vl.data_from_values(answer_frequencies)
+  |> Vl.mark(:bar)
+  |> Vl.encode_field(:x, "answer", type: :ordinal, title: "Answer")
+  |> Vl.encode_field(:y, "count", type: :quantitative, title: "Frequency")
+  |> Vl.encode(:color,
+    field: "answer",
+    type: :nominal,
+    legend: nil
+  )
+
+chart
+```
+
+**Observation**: If most samples agree on one answer, the model is confident. If answers are spread across many values, the model is uncertain or the prompt is ambiguous.
+
+## Self-Consistency: Selecting the Best Answer
+
+Self-consistency is a simple but powerful technique: generate multiple samples and choose the most common answer.
+
+```elixir
+defmodule SelfConsistency do
+  @doc """
+  Select the most frequent answer from samples.
+  Returns the answer and its confidence (percentage of agreement).
+  """
+  def select_best_answer(answers) do
+    frequencies = Enum.frequencies(answers)
+
+    {best_answer, count} =
+      frequencies
+      |> Enum.max_by(fn {_answer, count} -> count end)
+
+    confidence = count / length(answers) * 100
+
+    %{
+      answer: best_answer,
+      count: count,
+      total_samples: length(answers),
+      confidence: confidence
+    }
+  end
+end
+
+# Apply self-consistency
+result = SelfConsistency.select_best_answer(answers)
+
+IO.puts("\n=== Self-Consistency Result ===")
+IO.puts("Best Answer: #{result.answer}")
+IO.puts("Frequency: #{result.count}/#{result.total_samples}")
+IO.puts("Confidence: #{Float.round(result.confidence, 1)}%")
+
+# Compare to correct answer
+correct_answer = 67
+is_correct = result.answer == correct_answer
+
+IO.puts("\nCorrect Answer: #{correct_answer}")
+IO.puts("Model Selected: #{result.answer}")
+IO.puts("Result: #{if is_correct, do: "CORRECT", else: "INCORRECT"}")
+
+:ok
+```
+
+## Measuring Uncertainty with Entropy
+
+Entropy quantifies the uncertainty in a probability distribution. Higher entropy means more uncertainty.
+
+**Formula**: H(X) = -Σ p(x) log₂(p(x))
+
+Where p(x) is the probability of answer x.
+
+```elixir
+defmodule Entropy do
+  @doc """
+  Calculate Shannon entropy for a list of values.
+  Returns entropy in bits (base 2 logarithm).
+  """
+  def calculate(values) when is_list(values) and length(values) > 0 do
+    frequencies = Enum.frequencies(values)
+    total = length(values)
+
+    frequencies
+    |> Enum.map(fn {_value, count} ->
+      probability = count / total
+      -probability * :math.log2(probability)
+    end)
+    |> Enum.sum()
+  end
+
+  def calculate(_), do: 0.0
+
+  @doc """
+  Interpret entropy value.
+  """
+  def interpret(entropy, num_unique_values) do
+    max_entropy = :math.log2(num_unique_values)
+    normalized = entropy / max_entropy
+
+    cond do
+      normalized < 0.3 -> "Very confident (low entropy)"
+      normalized < 0.6 -> "Moderately confident"
+      normalized < 0.8 -> "Uncertain"
+      true -> "Very uncertain (high entropy)"
+    end
+  end
+end
+
+# Calculate entropy
+entropy = Entropy.calculate(answers)
+num_unique = length(Enum.uniq(answers))
+interpretation = Entropy.interpret(entropy, num_unique)
+
+IO.puts("\n=== Entropy Analysis ===")
+IO.puts("Entropy: #{Float.round(entropy, 3)} bits")
+IO.puts("Unique answers: #{num_unique}")
+IO.puts("Max entropy: #{Float.round(:math.log2(num_unique), 3)} bits")
+IO.puts("Interpretation: #{interpretation}")
+
+:ok
+```
+
+**Understanding Entropy:**
+
+* **Low entropy (0-1 bits)**: Model is very confident, answers cluster around one value
+* **Medium entropy (1-2 bits)**: Model is uncertain, answers spread across 2-4 values
+* **High entropy (>2 bits)**: Model is very uncertain, many different answers
+
+## Model Comparison: GPT-4o-mini vs GPT-4
+
+Let's compare how different models perform on the same problem.
+
+```elixir
+# Function to evaluate a model
+defmodule ModelEvaluator do
+  def evaluate(schema, prompt, api_key, model, n_samples) do
+    IO.puts("Evaluating #{model}...")
+
+    samples = Sampler.generate_samples(schema, prompt, api_key, model, n_samples)
+    answers = AnswerExtractor.extract_numbers_from_samples(samples)
+
+    best = SelfConsistency.select_best_answer(answers)
+    entropy_val = Entropy.calculate(answers)
+
+    %{
+      model: model,
+      total_samples: n_samples,
+      valid_samples: length(answers),
+      best_answer: best.answer,
+      confidence: best.confidence,
+      entropy: entropy_val,
+      is_correct: best.answer == 67
+    }
+  end
+end
+
+# Evaluate both models (uncomment if you have GPT-4 access)
+# results = [
+#   ModelEvaluator.evaluate(answer_schema, prompt, api_key, "gpt-4o-mini", 20),
+#   ModelEvaluator.evaluate(answer_schema, prompt, api_key, "gpt-4", 20)
+# ]
+
+# For demonstration, we'll show the GPT-4o-mini results
+result_mini = ModelEvaluator.evaluate(answer_schema, prompt, api_key, "gpt-4o-mini", 20)
+
+IO.puts("\n=== Model Performance ===")
+IO.puts("Model: #{result_mini.model}")
+IO.puts("Valid samples: #{result_mini.valid_samples}/#{result_mini.total_samples}")
+IO.puts("Best answer: #{result_mini.best_answer}")
+IO.puts("Confidence: #{Float.round(result_mini.confidence, 1)}%")
+IO.puts("Entropy: #{Float.round(result_mini.entropy, 3)} bits")
+IO.puts("Correct: #{result_mini.is_correct}")
+
+:ok
+```
+
+## Interactive Exploration
+
+Use the controls below to experiment with different parameters.
+
+```elixir
+# Create interactive inputs
+temperature_input = Kino.Input.range("Temperature", min: 0, max: 2, step: 0.1, default: 0.7)
+n_samples_input = Kino.Input.number("Number of samples", default: 10)
+
+Kino.render(temperature_input)
+Kino.render(n_samples_input)
+
+generate_button = Kino.Control.button("Generate Samples")
+Kino.render(generate_button)
+
+:ok
+```
+
+```elixir
+# Handle button clicks (reactive generation)
+Kino.listen(generate_button, fn _event ->
+  temp = Kino.Input.read(temperature_input)
+  n = Kino.Input.read(n_samples_input)
+
+  IO.puts("\nGenerating #{n} samples with temperature=#{temp}...")
+
+  tasks =
+    for _i <- 1..n do
+      {answer_schema,
+       [
+         backend: HTTP,
+         backend_opts: [
+           api_key: api_key,
+           model: model,
+           temperature: temp,
+           messages: [
+             %{role: "system", content: "You are a helpful math tutor."},
+             %{role: "user", content: prompt}
+           ]
+         ]
+       ]}
+    end
+
+  new_samples = ExOutlines.generate_batch(tasks, max_concurrency: 5)
+  new_answers = AnswerExtractor.extract_numbers_from_samples(new_samples)
+
+  result = SelfConsistency.select_best_answer(new_answers)
+  entropy_val = Entropy.calculate(new_answers)
+
+  IO.puts("Best answer: #{result.answer} (#{Float.round(result.confidence, 1)}% confidence)")
+  IO.puts("Entropy: #{Float.round(entropy_val, 3)} bits")
+  IO.puts("Correct: #{result.answer == 67}")
+end)
+```
+
+## Key Takeaways
+
+**Techniques Learned:**
+
+1. **Multi-sample generation**: Generate multiple outputs to explore model behavior
+2. **Self-consistency**: Choose the most common answer to improve accuracy
+3. **Entropy analysis**: Quantify model uncertainty
+4. **Model comparison**: Evaluate different models on the same task
+
+**When to Use These Techniques:**
+
+* **Reasoning tasks**: Math problems, logic puzzles, multi-step inference
+* **Uncertain predictions**: When model confidence is unclear
+* **Quality control**: Verify LLM outputs before using in production
+* **Model selection**: Compare models to find the best performer
+
+**Practical Applications:**
+
+* Automated grading systems (generate multiple evaluations, use consensus)
+* Medical diagnosis support (generate multiple interpretations, flag disagreements)
+* Code generation (sample multiple implementations, select most common pattern)
+* Question answering (generate multiple answers, return most consistent)
+
+## Challenges
+
+Try these exercises to deepen your understanding:
+
+1. **Temperature experiment**: Generate samples at temperatures 0.0, 0.5, 1.0, 1.5, and 2.0. How does entropy change?
+
+2. **Different problems**: Test other GSM8K problems. Do some problems have higher entropy than others?
+
+3. **Prompt engineering**: Modify the few-shot examples. Does this change the answer distribution?
+
+4. **Ensemble methods**: Combine self-consistency with other techniques (majority vote, weighted voting).
+
+5. **Cost optimization**: What's the minimum number of samples needed to get reliable results? Plot accuracy vs. number of samples.
+
+## Further Reading
+
+* **Ex Outlines Documentation**: Complete guides at `/guides`
+* **GSM8K Dataset**: [OpenAI Grade School Math](https://github.com/openai/grade-school-math)
+* **Self-Consistency Paper**: [Wang et al., 2022](https://arxiv.org/abs/2203.11171)
+* **Entropy in ML**: Understanding uncertainty quantification
+
+## Next Steps
+
+* Explore the **Simulation-Based Inference** notebook for advanced prompt optimization
+* Read the **Error Handling** guide for production robustness
+* Try the **Batch Processing** guide for high-throughput applications
