@@ -567,6 +567,17 @@ Both tools serve different ecosystems and constraints.
 
 ---
 
+## Next Steps
+
+Active development priorities for closing the gap with Python Outlines:
+
+- **String Length Constraints** - Add min_length and max_length for string validation
+- **Integer Min/Max Constraints** - Extend numeric validation beyond positive-only checks
+- **Array Validation** - Support arrays with item schemas and constraint validation
+- **Nested Object Support** - Enable recursive validation of nested object structures
+- **Regular Expression Patterns** - Add regex pattern matching for formatted strings
+- **Union Types** - Support fields that accept multiple type options
+
 ## Roadmap
 
 ### v0.3 (Planned)
