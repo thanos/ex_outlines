@@ -2,7 +2,7 @@ defmodule ExOutlines.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/your_org/ex_outlines"
+  @source_url "https://github.com/thanos/ex_outlines"
 
   def project do
     [
