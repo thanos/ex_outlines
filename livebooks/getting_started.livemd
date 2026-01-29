@@ -85,7 +85,7 @@ case Spec.validate(user_schema, valid_user) do
     IO.inspect(validated, pretty: true)
 
   {:error, diagnostics} ->
-    IO.puts("❌ Validation failed")
+    IO.puts("ERROR: Validation failed")
     IO.inspect(diagnostics, pretty: true)
 end
 ```
@@ -116,7 +116,7 @@ case Spec.validate(user_schema, invalid_user) do
     IO.puts("Validation successful!")
 
   {:error, diagnostics} ->
-    IO.puts("❌ Validation failed!")
+    IO.puts("ERROR: Validation failed!")
     IO.puts("\nErrors:")
 
     Enum.each(diagnostics.errors, fn error ->
@@ -131,7 +131,7 @@ end
 <!-- livebook:{"output":true} -->
 
 ```
-❌ Validation failed!
+ERROR: Validation failed!
 
 Errors:
   • Field: age
@@ -197,7 +197,7 @@ case Spec.validate(constrained_schema, valid_data) do
     IO.inspect(validated)
 
   {:error, diagnostics} ->
-    IO.puts("❌ Constraint violations:")
+    IO.puts("ERROR: Constraint violations:")
     Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
 end
 ```
@@ -220,7 +220,7 @@ case Spec.validate(constrained_schema, invalid_data) do
     IO.puts("Valid")
 
   {:error, diagnostics} ->
-    IO.puts("❌ Found #{length(diagnostics.errors)} validation errors:\n")
+    IO.puts("ERROR: Found #{length(diagnostics.errors)} validation errors:\n")
     Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
 end
 ```
@@ -524,14 +524,14 @@ case Spec.validate(movie_review_schema, review) do
     IO.puts("Movie review validated!")
     IO.puts("\nReview Details:")
     IO.puts("  Title: #{validated.title}")
-    IO.puts("  Rating: #{String.duplicate("⭐", validated.rating)}")
+    IO.puts("  Rating: #{String.duplicate("*", validated.rating)}")
     IO.puts("  Sentiment: #{validated.sentiment}")
     IO.puts("  Genres: #{Enum.join(validated.genres, ", ")}")
     IO.puts("  Would Recommend: #{if validated.would_recommend, do: "Yes", else: "No"}")
     IO.puts("\n  Summary: #{validated.summary}")
 
   {:error, diagnostics} ->
-    IO.puts("❌ Validation failed:")
+    IO.puts("ERROR: Validation failed:")
     Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
 end
 ```

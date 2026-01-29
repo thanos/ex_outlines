@@ -368,8 +368,8 @@ schema = Schema.new(%{
 input = %{"name" => "Alice", "age" => 30}
 
 # Validation steps:
-# 1. Check "name": string? ✓ Length >= 2? ✓
-# 2. Check "age": integer? ✓ >= 0? ✓ <= 120? ✓
+# 1. Check "name": string? yes Length >= 2? yes
+# 2. Check "age": integer? yes >= 0? yes <= 120? yes
 # 3. No errors, transform keys
 # 4. Return {:ok, %{name: "Alice", age: 30}}
 ```

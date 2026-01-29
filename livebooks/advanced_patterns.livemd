@@ -25,12 +25,12 @@ If you need a refresher, check out the **Getting Started** livebook first!
 
 ### What You'll Learn
 
-* 🏗️ **Nested Objects**: Complex hierarchical data structures
-* 🔀 **Union Types**: Fields that accept multiple types
-* 🎯 **Advanced Validation**: Complex constraints and patterns
-* 🏭 **Production Patterns**: Real-world integration strategies
-* ⚡ **Performance**: Optimization tips and best practices
-* 🔧 **Error Handling**: Sophisticated retry and recovery strategies
+* **Nested Objects**: Complex hierarchical data structures
+* **Union Types**: Fields that accept multiple types
+* **Advanced Validation**: Complex constraints and patterns
+* **Production Patterns**: Real-world integration strategies
+* **Performance**: Optimization tips and best practices
+* **Error Handling**: Sophisticated retry and recovery strategies
 
 Let's dive into advanced territory!
 
@@ -82,12 +82,12 @@ case Spec.validate(user_schema, valid_user) do
     IO.puts("Address: #{validated.address.street}, #{validated.address.city}, #{validated.address.state} #{validated.address.zip_code}")
 
   {:error, diagnostics} ->
-    IO.puts("❌ Validation failed:")
+    IO.puts("ERROR: Validation failed:")
     Enum.each(diagnostics.errors, &IO.puts("  • #{&1.message}"))
 end
 ```
 
-### 🔍 Error Path Tracking
+### ** Error Path Tracking
 
 When nested validation fails, errors include the full path:
 
@@ -110,7 +110,7 @@ case Spec.validate(user_schema, invalid_user) do
     IO.puts("Valid")
 
   {:error, diagnostics} ->
-    IO.puts("❌ Validation errors with full paths:\n")
+    IO.puts("ERROR: Validation errors with full paths:\n")
 
     Enum.each(diagnostics.errors, fn error ->
       IO.puts("  • Field: #{error.field}")
@@ -489,7 +489,7 @@ defmodule RetryStrategies do
         attempt_with_backoff(func, attempt + 1, max_attempts)
 
       {:error, reason} ->
-        IO.puts("❌ All retries exhausted")
+        IO.puts("ERROR: All retries exhausted")
         {:error, reason}
     end
   end
@@ -668,7 +668,7 @@ defmodule PerformanceDemo do
   alias ExOutlines.Spec.Schema
 
   @doc """
-  ❌ BAD: Creating schema on every validation
+  ERROR: BAD: Creating schema on every validation
   """
   def validate_slow(data) do
     # Schema created every time!
