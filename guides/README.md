@@ -153,29 +153,29 @@ Looking for complete example applications? Check out:
 ## Best Practices Summary
 
 ### Development
-- ✅ Use Mock backend for fast unit tests
-- ✅ Structure code for testability
-- ✅ Validate early and often
-- ✅ Cache LLM results where appropriate
+-Use Mock backend for fast unit tests
+-Structure code for testability
+-Validate early and often
+-Cache LLM results where appropriate
 
 ### Production
-- ✅ Implement graceful degradation
-- ✅ Monitor with telemetry
-- ✅ Use circuit breakers for critical paths
-- ✅ Set appropriate timeouts
-- ✅ Log errors with context
+-Implement graceful degradation
+-Monitor with telemetry
+-Use circuit breakers for critical paths
+-Set appropriate timeouts
+-Log errors with context
 
 ### Performance
-- ✅ Process long tasks in background jobs
-- ✅ Use batch processing for multiple items
-- ✅ Cache frequently requested results
-- ✅ Set conservative retry limits
+-Process long tasks in background jobs
+-Use batch processing for multiple items
+-Cache frequently requested results
+-Set conservative retry limits
 
 ### Security
-- ✅ Store API keys in environment variables
-- ✅ Rate limit AI endpoints
-- ✅ Validate all user input
-- ✅ Sanitize error messages for users
+-Store API keys in environment variables
+-Rate limit AI endpoints
+-Validate all user input
+-Sanitize error messages for users
 
 ## Getting Help
 
