@@ -8,7 +8,87 @@ These guides provide step-by-step instructions, code examples, and best practice
 
 ## Available Guides
 
-### [Phoenix Integration](phoenix_integration.md)
+### Core Documentation
+
+#### [Getting Started](getting_started.md)
+
+Complete introduction to ExOutlines for new users.
+
+**Topics Covered:**
+- Installation and setup
+- Creating your first schema
+- Understanding validation
+- Working with backends
+- Common patterns
+
+**Best For:** Developers new to ExOutlines
+
+**Time to Complete:** 30-45 minutes
+
+---
+
+#### [Core Concepts](core_concepts.md)
+
+Deep dive into ExOutlines architecture and design.
+
+**Topics Covered:**
+- Structured generation principles
+- Schema definition and type system
+- Validation process
+- Retry-repair loop mechanics
+- Backend architecture
+- Telemetry integration
+
+**Best For:** Developers who want to understand how ExOutlines works internally
+
+**Time to Complete:** 45-60 minutes
+
+---
+
+#### [Architecture](architecture.md)
+
+Technical architecture and design decisions.
+
+**Topics Covered:**
+- System overview and module organization
+- Validation engine implementation
+- Backend architecture patterns
+- Retry-repair loop algorithm
+- Design rationale and trade-offs
+- Extension points
+
+**Best For:** Contributors and advanced users
+
+**Time to Complete:** 60 minutes
+
+---
+
+### Schema Design
+
+#### [Schema Patterns](schema_patterns.md)
+
+Comprehensive guide to schema design and validation patterns.
+
+**Topics Covered:**
+- Basic schema patterns
+- String validation (length, regex, format)
+- Numeric constraints (min, max, ranges)
+- Array validation patterns
+- Nested object schemas
+- Union types for flexibility
+- Enum patterns
+- Common validation scenarios
+- Schema composition and reuse
+
+**Best For:** All users building schemas for real applications
+
+**Time to Complete:** 45-60 minutes
+
+---
+
+### Integration Guides
+
+#### [Phoenix Integration](phoenix_integration.md)
 
 Learn how to integrate ExOutlines into Phoenix applications.
 
@@ -25,7 +105,26 @@ Learn how to integrate ExOutlines into Phoenix applications.
 
 ---
 
-### [Testing Strategies](testing_strategies.md)
+#### [Ecto Schema Adapter](ecto_schema_adapter.md)
+
+Reuse existing Ecto schemas with ExOutlines.
+
+**Topics Covered:**
+- Converting Ecto schemas to ExOutlines format
+- Automatic validation extraction from changesets
+- Embedded schemas and Ecto.Enum support
+- Integration patterns for Phoenix applications
+- Best practices for schema reuse
+
+**Best For:** Developers with existing Ecto schemas who want to avoid duplication
+
+**Time to Complete:** 30-45 minutes
+
+---
+
+### Testing and Quality
+
+#### [Testing Strategies](testing_strategies.md)
 
 Master testing patterns for LLM-powered applications.
 
@@ -43,7 +142,7 @@ Master testing patterns for LLM-powered applications.
 
 ---
 
-### [Error Handling](error_handling.md)
+#### [Error Handling](error_handling.md)
 
 Build resilient applications with proper error handling.
 
@@ -61,20 +160,25 @@ Build resilient applications with proper error handling.
 
 ---
 
-### [Ecto Schema Adapter](ecto_schema_adapter.md)
+### Performance and Scale
 
-Reuse existing Ecto schemas with ExOutlines.
+#### [Batch Processing](batch_processing.md)
+
+Process multiple LLM requests concurrently using BEAM's concurrency model.
 
 **Topics Covered:**
-- Converting Ecto schemas to ExOutlines format
-- Automatic validation extraction from changesets
-- Embedded schemas and Ecto.Enum support
-- Integration patterns for Phoenix applications
-- Best practices for schema reuse
+- Why batch processing matters
+- Using generate_batch/2
+- Concurrency configuration
+- Error handling for batches
+- Performance optimization
+- Real-world patterns (content moderation, product categorization)
+- Monitoring with telemetry
+- Cost optimization
 
-**Best For:** Developers with existing Ecto schemas who want to avoid duplication
+**Best For:** Developers building high-throughput applications
 
-**Time to Complete:** 30-45 minutes
+**Time to Complete:** 45-60 minutes
 
 ---
 
@@ -82,29 +186,46 @@ Reuse existing Ecto schemas with ExOutlines.
 
 New to ExOutlines? Follow this learning path:
 
-1. **Start Here**: [Getting Started Livebook](../livebooks/getting_started.livemd)
-   - Interactive introduction to ExOutlines basics
-   - Learn schemas, validation, and constraints
+1. **Start Here**: [Getting Started Guide](getting_started.md)
+   - Complete introduction to ExOutlines basics
+   - Learn schemas, validation, and backends
    - ~30 minutes
 
-2. **Build Something**: [Phoenix Integration](phoenix_integration.md)
+2. **Understand the Concepts**: [Core Concepts](core_concepts.md)
+   - Structured generation principles
+   - Validation and retry-repair loop
+   - Backend architecture
+   - ~45 minutes
+
+3. **Design Great Schemas**: [Schema Patterns](schema_patterns.md)
+   - Common validation patterns
+   - String, numeric, and array constraints
+   - Nested objects and union types
+   - ~45 minutes
+
+4. **Build Something**: [Phoenix Integration](phoenix_integration.md)
    - Integrate ExOutlines into a Phoenix app
    - Controller and LiveView examples
    - ~45 minutes
 
-3. **Test It**: [Testing Strategies](testing_strategies.md)
+5. **Scale It**: [Batch Processing](batch_processing.md)
+   - Process multiple requests concurrently
+   - BEAM concurrency advantages
+   - ~45 minutes
+
+6. **Test It**: [Testing Strategies](testing_strategies.md)
    - Write fast, reliable tests
    - Mock backend and integration tests
    - ~45 minutes
 
-4. **Make It Production-Ready**: [Error Handling](error_handling.md)
+7. **Make It Production-Ready**: [Error Handling](error_handling.md)
    - Handle errors gracefully
    - Monitor and alert on issues
    - ~45 minutes
 
-5. **Advanced Topics**: [Advanced Patterns Livebook](../livebooks/advanced_patterns.livemd)
-   - Nested objects, union types, complex schemas
-   - Production patterns and performance tips
+8. **Interactive Learning**: [Sampling Livebook](../livebooks/sampling_and_self_consistency.livemd)
+   - Interactive multi-sample generation
+   - Self-consistency and entropy analysis
    - ~60 minutes
 
 ## Common Use Cases
@@ -138,6 +259,11 @@ All guides include complete, runnable code examples that you can copy and adapt 
 
 Looking for complete example applications? Check out:
 
+- **[Resume Parser](../examples/resume_parser.exs)**
+  - Demonstrates: complex nested objects, arrays, union types, format validation
+  - Use case: Automated resume screening and ATS integration
+  - Schema: Personal info, work history, education, skills, certifications
+
 - **[E-commerce Product Categorization](../examples/ecommerce_categorization.exs)**
   - Demonstrates: nested objects, arrays, enums
   - Use case: Automated product data extraction
@@ -149,6 +275,10 @@ Looking for complete example applications? Check out:
 - **[Document Metadata Extraction](../examples/document_metadata_extraction.exs)**
   - Demonstrates: format validation, nested authors
   - Use case: Content management systems
+
+- **[Classification Example](../examples/classification.exs)**
+  - Demonstrates: basic enum-based classification
+  - Use case: Customer support ticket categorization
 
 ## Best Practices Summary
 
