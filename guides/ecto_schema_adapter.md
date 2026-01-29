@@ -437,5 +437,5 @@ See `examples/ecto_schema_adapter.exs` for a complete working example.
 
 - [Ecto Schema Documentation](https://hexdocs.pm/ecto/Ecto.Schema.html)
 - [Ecto Changeset Documentation](https://hexdocs.pm/ecto/Ecto.Changeset.html)
-- [ExOutlines Schema Guide](schema_definition.md)
+- [ExOutlines Schema Guide](schema_patterns.md)
 - [Phoenix Integration Guide](phoenix_integration.md)

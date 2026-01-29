@@ -661,4 +661,4 @@ end
 * [Schema Patterns Guide](../guides/schema_patterns.md)
 * [Batch Processing Guide](../guides/batch_processing.md)
 * [Phoenix Integration Guide](../guides/phoenix_integration.md)
-* [Production Examples](../examples/)
+* Production Examples (see examples/ folder in repository)
