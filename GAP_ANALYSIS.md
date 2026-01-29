@@ -7,7 +7,7 @@
 
 ---
 
-## Executive Summary
+## Overview
 
 ex_outlines (Elixir) and Python Outlines represent **fundamentally different architectural approaches** to structured LLM output generation:
 
