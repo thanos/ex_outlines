@@ -1,0 +1,1271 @@
+# Receipt Digitization with Vision-Language Models
+
+```elixir
+Mix.install([
+  {:ex_outlines, path: Path.join(__DIR__, "..")},
+  {:req, "~> 0.5.0"},
+  {:jason, "~> 1.4"},
+  {:decimal, "~> 2.0"}
+])
+```
+
+## Introduction
+
+This notebook demonstrates how to digitize receipts using vision-language models (VLMs). Receipts are challenging documents because they:
+
+- Come in many different formats and layouts
+- Often have poor print quality or are faded
+- May be photographed at angles or with poor lighting
+- Include handwritten elements
+- Have variable line item structures
+- Mix printed and handwritten text
+
+ExOutlines combined with VLMs provides a robust solution for extracting structured data from receipt images, enabling:
+
+Real-world applications:
+- Expense management and reimbursement
+- Accounting automation
+- Tax deduction tracking
+- Business expense analytics
+- Retail analytics and customer insights
+- Warranty and return tracking
+
+## Receipt Schema Design
+
+```elixir
+defmodule ReceiptSchemas do
+  @moduledoc """
+  Schemas for extracting structured data from receipts.
+  """
+
+  alias ExOutlines.Spec.Schema
+
+  @doc """
+  Schema for a single line item on a receipt.
+  """
+  def line_item_schema do
+    Schema.new(%{
+      description: %{
+        type: :string,
+        required: true,
+        min_length: 1,
+        max_length: 200,
+        description: "Item description or product name"
+      },
+      quantity: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Quantity purchased"
+      },
+      unit_price: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Price per unit"
+      },
+      total_price: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Total price for this line item"
+      },
+      category: %{
+        type: {:enum, [
+          "food",
+          "beverage",
+          "alcohol",
+          "office_supplies",
+          "electronics",
+          "clothing",
+          "transportation",
+          "accommodation",
+          "entertainment",
+          "health",
+          "other"
+        ]},
+        required: false,
+        description: "Item category for expense tracking"
+      }
+    })
+  end
+
+  @doc """
+  Schema for complete receipt data.
+  """
+  def receipt_schema do
+    Schema.new(%{
+      merchant_name: %{
+        type: :string,
+        required: true,
+        min_length: 1,
+        max_length: 100,
+        description: "Name of the merchant or business"
+      },
+      merchant_address: %{
+        type: :string,
+        required: false,
+        max_length: 300,
+        description: "Full address of the merchant"
+      },
+      merchant_phone: %{
+        type: :string,
+        required: false,
+        pattern: ~r/^[\d\s\-\+\(\)]+$/,
+        description: "Merchant phone number"
+      },
+      transaction_date: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/,
+        description: "Transaction date in YYYY-MM-DD format"
+      },
+      transaction_time: %{
+        type: :string,
+        required: false,
+        pattern: ~r/^\d{2}:\d{2}(:\d{2})?$/,
+        description: "Transaction time in HH:MM or HH:MM:SS format"
+      },
+      receipt_number: %{
+        type: :string,
+        required: false,
+        description: "Receipt or transaction number"
+      },
+      items: %{
+        type: {:array, %{type: {:object, line_item_schema()}}},
+        required: true,
+        min_items: 1,
+        description: "List of purchased items"
+      },
+      subtotal: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Subtotal before tax and tips"
+      },
+      tax: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Tax amount"
+      },
+      tip: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Tip amount"
+      },
+      total: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Total amount paid"
+      },
+      currency: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^[A-Z]{3}$/,
+        description: "Currency code (ISO 4217)"
+      },
+      payment_method: %{
+        type: {:enum, [
+          "cash",
+          "credit_card",
+          "debit_card",
+          "mobile_payment",
+          "check",
+          "other"
+        ]},
+        required: false,
+        description: "Method of payment"
+      },
+      card_last_four: %{
+        type: :string,
+        required: false,
+        pattern: ~r/^\d{4}$/,
+        description: "Last 4 digits of card if applicable"
+      }
+    })
+  end
+
+  @doc """
+  Simplified schema for quick receipt capture.
+  """
+  def simple_receipt_schema do
+    Schema.new(%{
+      merchant_name: %{type: :string, required: true},
+      transaction_date: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/
+      },
+      total: %{type: :number, required: true, min: 0},
+      currency: %{type: :string, required: true, pattern: ~r/^[A-Z]{3}$/},
+      category: %{
+        type: {:enum, [
+          "meals",
+          "transportation",
+          "accommodation",
+          "supplies",
+          "entertainment",
+          "other"
+        ]},
+        required: false
+      }
+    })
+  end
+
+  @doc """
+  Schema for restaurant receipt with detailed breakdown.
+  """
+  def restaurant_receipt_schema do
+    Schema.new(%{
+      restaurant_name: %{type: :string, required: true},
+      transaction_date: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/
+      },
+      transaction_time: %{type: :string, required: false},
+      items: %{
+        type: {:array, %{type: {:object, line_item_schema()}}},
+        required: true,
+        min_items: 1
+      },
+      subtotal: %{type: :number, required: true, min: 0},
+      tax: %{type: :number, required: false, min: 0},
+      tip: %{type: :number, required: false, min: 0},
+      total: %{type: :number, required: true, min: 0},
+      currency: %{type: :string, required: true, pattern: ~r/^[A-Z]{3}$/},
+      party_size: %{
+        type: :integer,
+        required: false,
+        min: 1,
+        description: "Number of guests"
+      },
+      server_name: %{
+        type: :string,
+        required: false,
+        description: "Name of server"
+      }
+    })
+  end
+end
+```
+
+## Example 1: Basic Receipt Extraction
+
+Extract structured data from a retail receipt:
+
+```elixir
+defmodule ReceiptExtractor do
+  @moduledoc """
+  Extract structured data from receipt images.
+  """
+
+  alias ExOutlines.{Spec, Backend.Mock}
+  alias ReceiptSchemas
+
+  @doc """
+  Extract receipt data from an image file.
+
+  The image should be a photograph or scan of a receipt. Supported formats
+  include JPG, PNG, and other common image formats.
+  """
+  def extract_from_image(image_path, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+    schema_type = Keyword.get(opts, :schema, :full)
+
+    # Read image and encode to base64
+    {:ok, image_data} = File.read(image_path)
+    base64_image = Base.encode64(image_data)
+
+    # Determine image media type from extension
+    media_type = case Path.extname(image_path) do
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".png" -> "image/png"
+      _ -> "image/jpeg"
+    end
+
+    # Build vision model prompt
+    messages = [
+      %{
+        role: "user",
+        content: [
+          %{
+            type: "image",
+            source: %{
+              type: "base64",
+              media_type: media_type,
+              data: base64_image
+            }
+          },
+          %{
+            type: "text",
+            text: build_extraction_prompt(schema_type)
+          }
+        ]
+      }
+    ]
+
+    # Select schema based on type
+    schema = case schema_type do
+      :simple -> ReceiptSchemas.simple_receipt_schema()
+      :restaurant -> ReceiptSchemas.restaurant_receipt_schema()
+      :full -> ReceiptSchemas.receipt_schema()
+    end
+
+    case Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages,
+      max_retries: 3
+    ) do
+      {:ok, receipt_data} ->
+        # Validate totals
+        validate_receipt_totals(receipt_data)
+
+      error ->
+        error
+    end
+  end
+
+  defp build_extraction_prompt(:simple) do
+    """
+    Extract basic information from this receipt:
+    - Merchant name
+    - Transaction date (convert to YYYY-MM-DD format)
+    - Total amount
+    - Currency
+
+    Be as accurate as possible with numbers and dates.
+    """
+  end
+
+  defp build_extraction_prompt(:restaurant) do
+    """
+    Extract detailed information from this restaurant receipt:
+    - Restaurant name
+    - Date and time of transaction
+    - All food and beverage items with prices
+    - Subtotal, tax, tip, and total
+    - Server name if shown
+    - Number of guests if shown
+
+    Pay careful attention to:
+    - Distinguish between food items and beverages
+    - Separate subtotal, tax, and tip
+    - Ensure item prices sum to subtotal
+    """
+  end
+
+  defp build_extraction_prompt(:full) do
+    """
+    Extract complete information from this receipt. Include:
+
+    Merchant Information:
+    - Business name
+    - Full address
+    - Phone number
+
+    Transaction Details:
+    - Date (in YYYY-MM-DD format)
+    - Time (in HH:MM format)
+    - Receipt/transaction number
+
+    Items Purchased:
+    - Description of each item
+    - Quantity if shown
+    - Unit price if shown
+    - Total price for each item
+    - Categorize each item (food, beverage, supplies, etc.)
+
+    Payment Details:
+    - Subtotal
+    - Tax amount
+    - Tip if applicable
+    - Total amount
+    - Currency (3-letter code like USD, EUR, GBP)
+    - Payment method if shown
+    - Last 4 digits of card if shown
+
+    Be extremely careful with:
+    - Number accuracy (do not hallucinate amounts)
+    - Date format conversion
+    - Item categorization
+    - Distinguishing between similar items
+    """
+  end
+
+  defp validate_receipt_totals(receipt_data) do
+    # Validate that items sum to subtotal
+    if Map.has_key?(receipt_data, :items) do
+      calculated_subtotal = receipt_data.items
+      |> Enum.map(& &1.total_price)
+      |> Enum.sum()
+      |> Float.round(2)
+
+      expected_subtotal = Float.round(receipt_data.subtotal, 2)
+
+      # Allow small rounding differences (1 cent per item)
+      tolerance = length(receipt_data.items) * 0.01
+
+      if abs(calculated_subtotal - expected_subtotal) > tolerance do
+        {:warning, receipt_data, [
+          "Item totals (#{calculated_subtotal}) don't match subtotal (#{expected_subtotal})"
+        ]}
+      else
+        validate_final_total(receipt_data)
+      end
+    else
+      {:ok, receipt_data}
+    end
+  end
+
+  defp validate_final_total(receipt_data) do
+    # Validate final total = subtotal + tax + tip
+    calculated_total = receipt_data.subtotal +
+                      (receipt_data[:tax] || 0) +
+                      (receipt_data[:tip] || 0)
+    calculated_total = Float.round(calculated_total, 2)
+
+    expected_total = Float.round(receipt_data.total, 2)
+
+    if abs(calculated_total - expected_total) > 0.02 do
+      {:warning, receipt_data, [
+        "Calculated total (#{calculated_total}) doesn't match receipt total (#{expected_total})"
+      ]}
+    else
+      {:ok, receipt_data}
+    end
+  end
+end
+```
+
+## Example Receipt Data
+
+```elixir
+# Simulate extracting a retail receipt
+mock_retail_receipt = %{
+  merchant_name: "Office Depot",
+  merchant_address: "123 Main Street, Springfield, IL 62701",
+  merchant_phone: "555-0123",
+  transaction_date: "2024-01-15",
+  transaction_time: "14:32:00",
+  receipt_number: "5678-1234-9012",
+  items: [
+    %{
+      description: "Paper, Copy Paper, 500 sheets",
+      quantity: 2,
+      unit_price: 8.99,
+      total_price: 17.98,
+      category: "office_supplies"
+    },
+    %{
+      description: "Pen, Ballpoint, Black, 12-pack",
+      quantity: 1,
+      unit_price: 5.49,
+      total_price: 5.49,
+      category: "office_supplies"
+    },
+    %{
+      description: "Notebook, Spiral, College Ruled",
+      quantity: 3,
+      unit_price: 3.99,
+      total_price: 11.97,
+      category: "office_supplies"
+    }
+  ],
+  subtotal: 35.44,
+  tax: 3.19,
+  tip: 0.0,
+  total: 38.63,
+  currency: "USD",
+  payment_method: "credit_card",
+  card_last_four: "4242"
+}
+
+mock = Mock.new([{:ok, Jason.encode!(mock_retail_receipt)}])
+
+{:ok, receipt} = ReceiptExtractor.extract_from_image(
+  "office_supplies_receipt.jpg",
+  backend: Mock,
+  backend_opts: [mock: mock],
+  schema: :full
+)
+
+IO.inspect(receipt, label: "Extracted Receipt")
+
+# Calculate statistics
+IO.puts("\nReceipt Statistics:")
+IO.puts("Total items: #{length(receipt.items)}")
+IO.puts("Subtotal: $#{receipt.subtotal}")
+IO.puts("Tax: $#{receipt.tax}")
+IO.puts("Total: $#{receipt.total}")
+IO.puts("Tax rate: #{Float.round(receipt.tax / receipt.subtotal * 100, 2)}%")
+```
+
+## Example 2: Restaurant Receipt Processing
+
+Extract detailed information from restaurant receipts:
+
+```elixir
+defmodule RestaurantReceiptProcessor do
+  @moduledoc """
+  Specialized processing for restaurant receipts.
+  """
+
+  alias ExOutlines.{Spec, Backend.Mock}
+  alias ReceiptSchemas
+
+  def process_restaurant_receipt(image_path, opts \\ []) do
+    case ReceiptExtractor.extract_from_image(image_path,
+      Keyword.merge(opts, [schema: :restaurant])
+    ) do
+      {:ok, receipt} ->
+        analyzed = analyze_restaurant_receipt(receipt)
+        {:ok, analyzed}
+
+      {:warning, receipt, warnings} ->
+        analyzed = analyze_restaurant_receipt(receipt)
+        {:warning, analyzed, warnings}
+
+      error ->
+        error
+    end
+  end
+
+  defp analyze_restaurant_receipt(receipt) do
+    # Calculate per-person cost if party size known
+    per_person = if receipt[:party_size] do
+      receipt.total / receipt.party_size
+    else
+      nil
+    end
+
+    # Categorize items
+    food_items = Enum.filter(receipt.items, &(&1[:category] == "food"))
+    beverage_items = Enum.filter(receipt.items, &(&1[:category] == "beverage"))
+    alcohol_items = Enum.filter(receipt.items, &(&1[:category] == "alcohol"))
+
+    # Calculate category totals
+    food_total = Enum.reduce(food_items, 0, &(&1.total_price + &2))
+    beverage_total = Enum.reduce(beverage_items, 0, &(&1.total_price + &2))
+    alcohol_total = Enum.reduce(alcohol_items, 0, &(&1.total_price + &2))
+
+    # Calculate tip percentage
+    tip_percentage = if receipt[:tip] && receipt[:subtotal] do
+      (receipt.tip / receipt.subtotal) * 100
+    else
+      nil
+    end
+
+    Map.merge(receipt, %{
+      analysis: %{
+        per_person_cost: per_person,
+        food_total: food_total,
+        beverage_total: beverage_total,
+        alcohol_total: alcohol_total,
+        tip_percentage: tip_percentage,
+        item_count: length(receipt.items)
+      }
+    })
+  end
+end
+```
+
+## Example Restaurant Receipt
+
+```elixir
+mock_restaurant_receipt = %{
+  restaurant_name: "The Italian Kitchen",
+  transaction_date: "2024-01-20",
+  transaction_time: "19:45",
+  items: [
+    %{description: "Caesar Salad", quantity: 2, unit_price: 12.99, total_price: 25.98, category: "food"},
+    %{description: "Spaghetti Carbonara", quantity: 1, unit_price: 18.99, total_price: 18.99, category: "food"},
+    %{description: "Margherita Pizza", quantity: 1, unit_price: 16.99, total_price: 16.99, category: "food"},
+    %{description: "Tiramisu", quantity: 2, unit_price: 8.99, total_price: 17.98, category: "food"},
+    %{description: "Iced Tea", quantity: 2, unit_price: 3.99, total_price: 7.98, category: "beverage"},
+    %{description: "Glass of Chianti", quantity: 1, unit_price: 12.00, total_price: 12.00, category: "alcohol"}
+  ],
+  subtotal: 99.92,
+  tax: 8.99,
+  tip: 18.00,
+  total: 126.91,
+  currency: "USD",
+  party_size: 2,
+  server_name: "Maria"
+}
+
+mock = Mock.new([{:ok, Jason.encode!(mock_restaurant_receipt)}])
+
+{:ok, restaurant_receipt} = RestaurantReceiptProcessor.process_restaurant_receipt(
+  "restaurant_receipt.jpg",
+  backend: Mock,
+  backend_opts: [mock: mock]
+)
+
+IO.inspect(restaurant_receipt.analysis, label: "Receipt Analysis")
+
+IO.puts("\nRestaurant Receipt Summary:")
+IO.puts("Restaurant: #{restaurant_receipt.restaurant_name}")
+IO.puts("Date: #{restaurant_receipt.transaction_date} at #{restaurant_receipt.transaction_time}")
+IO.puts("Server: #{restaurant_receipt.server_name}")
+IO.puts("Party size: #{restaurant_receipt.party_size}")
+IO.puts("\nBreakdown:")
+IO.puts("  Food: $#{Float.round(restaurant_receipt.analysis.food_total, 2)}")
+IO.puts("  Beverages: $#{Float.round(restaurant_receipt.analysis.beverage_total, 2)}")
+IO.puts("  Alcohol: $#{Float.round(restaurant_receipt.analysis.alcohol_total, 2)}")
+IO.puts("  Tax: $#{restaurant_receipt.tax}")
+IO.puts("  Tip: $#{restaurant_receipt.tip} (#{Float.round(restaurant_receipt.analysis.tip_percentage, 1)}%)")
+IO.puts("  Total: $#{restaurant_receipt.total}")
+IO.puts("  Per person: $#{Float.round(restaurant_receipt.analysis.per_person_cost, 2)}")
+```
+
+## Example 3: Batch Receipt Processing
+
+Process multiple receipts efficiently:
+
+```elixir
+defmodule BatchReceiptProcessor do
+  @moduledoc """
+  Process multiple receipts concurrently.
+  """
+
+  def process_receipts_batch(image_paths, opts \\ []) do
+    max_concurrency = Keyword.get(opts, :max_concurrency, 4)
+
+    results = image_paths
+    |> Task.async_stream(
+      fn path ->
+        {path, ReceiptExtractor.extract_from_image(path, opts)}
+      end,
+      max_concurrency: max_concurrency,
+      timeout: 30_000
+    )
+    |> Enum.map(fn
+      {:ok, {path, result}} -> {path, result}
+      {:exit, reason} -> {:error, reason}
+    end)
+
+    # Separate successful and failed extractions
+    successful = Enum.filter(results, fn
+      {_path, {:ok, _data}} -> true
+      {_path, {:warning, _data, _warnings}} -> true
+      _ -> false
+    end)
+
+    failed = Enum.filter(results, fn
+      {_path, {:error, _reason}} -> true
+      _ -> false
+    end)
+
+    %{
+      successful: successful,
+      failed: failed,
+      total: length(results),
+      success_rate: length(successful) / length(results) * 100
+    }
+  end
+
+  def summarize_batch(batch_results) do
+    receipts = Enum.map(batch_results.successful, fn
+      {_path, {:ok, data}} -> data
+      {_path, {:warning, data, _warnings}} -> data
+    end)
+
+    total_amount = Enum.reduce(receipts, 0, fn receipt, acc ->
+      acc + receipt.total
+    end)
+
+    by_merchant = receipts
+    |> Enum.group_by(& &1.merchant_name)
+    |> Enum.map(fn {merchant, receipts} ->
+      merchant_total = Enum.reduce(receipts, 0, &(&1.total + &2))
+      {merchant, %{count: length(receipts), total: merchant_total}}
+    end)
+    |> Enum.into(%{})
+
+    %{
+      total_receipts: length(receipts),
+      total_amount: total_amount,
+      average_amount: total_amount / max(length(receipts), 1),
+      by_merchant: by_merchant
+    }
+  end
+end
+```
+
+## Batch Processing Example
+
+```elixir
+# Simulate processing multiple receipts
+receipt_paths = [
+  "receipt1.jpg",
+  "receipt2.jpg",
+  "receipt3.jpg"
+]
+
+# Mock data for multiple receipts
+mock_receipts = [
+  %{merchant_name: "Coffee Shop", transaction_date: "2024-01-15", total: 12.50, currency: "USD"},
+  %{merchant_name: "Gas Station", transaction_date: "2024-01-16", total: 45.00, currency: "USD"},
+  %{merchant_name: "Coffee Shop", transaction_date: "2024-01-17", total: 8.75, currency: "USD"}
+]
+
+# Create mock with multiple responses
+mock = Mock.new(Enum.map(mock_receipts, fn receipt ->
+  {:ok, Jason.encode!(receipt)}
+end))
+
+# Process batch
+batch_results = BatchReceiptProcessor.process_receipts_batch(
+  receipt_paths,
+  backend: Mock,
+  backend_opts: [mock: mock],
+  schema: :simple
+)
+
+IO.puts("Batch Processing Results:")
+IO.puts("Total processed: #{batch_results.total}")
+IO.puts("Successful: #{length(batch_results.successful)}")
+IO.puts("Failed: #{length(batch_results.failed)}")
+IO.puts("Success rate: #{Float.round(batch_results.success_rate, 1)}%")
+
+# Summarize
+summary = BatchReceiptProcessor.summarize_batch(batch_results)
+
+IO.puts("\nBatch Summary:")
+IO.puts("Total receipts: #{summary.total_receipts}")
+IO.puts("Total amount: $#{Float.round(summary.total_amount, 2)}")
+IO.puts("Average amount: $#{Float.round(summary.average_amount, 2)}")
+
+IO.puts("\nBy Merchant:")
+Enum.each(summary.by_merchant, fn {merchant, stats} ->
+  IO.puts("  #{merchant}: #{stats.count} receipts, $#{Float.round(stats.total, 2)}")
+end)
+```
+
+## Example 4: Expense Categorization and Export
+
+Categorize expenses and export for accounting:
+
+```elixir
+defmodule ExpenseManager do
+  @moduledoc """
+  Manage expense categorization and reporting.
+  """
+
+  @doc """
+  Categorize receipt for expense reporting.
+  """
+  def categorize_expense(receipt) do
+    # Determine expense category based on merchant and items
+    primary_category = determine_primary_category(receipt)
+
+    # Check if receipt is reimbursable
+    is_reimbursable = check_reimbursable(receipt, primary_category)
+
+    # Calculate tax deductible amount
+    deductible_amount = calculate_deductible(receipt, primary_category)
+
+    %{
+      receipt: receipt,
+      expense_category: primary_category,
+      is_reimbursable: is_reimbursable,
+      deductible_amount: deductible_amount,
+      requires_approval: receipt.total > 100,
+      tags: generate_tags(receipt)
+    }
+  end
+
+  defp determine_primary_category(receipt) do
+    cond do
+      String.contains?(String.downcase(receipt.merchant_name), ["restaurant", "cafe", "bistro", "kitchen"]) ->
+        "meals_and_entertainment"
+
+      String.contains?(String.downcase(receipt.merchant_name), ["hotel", "inn", "suites"]) ->
+        "accommodation"
+
+      String.contains?(String.downcase(receipt.merchant_name), ["uber", "lyft", "taxi", "gas"]) ->
+        "transportation"
+
+      String.contains?(String.downcase(receipt.merchant_name), ["office", "staples", "depot"]) ->
+        "office_supplies"
+
+      true ->
+        "other"
+    end
+  end
+
+  defp check_reimbursable(receipt, category) do
+    # Business logic for reimbursement eligibility
+    case category do
+      "meals_and_entertainment" -> receipt.total <= 150
+      "accommodation" -> true
+      "transportation" -> true
+      "office_supplies" -> true
+      _ -> false
+    end
+  end
+
+  defp calculate_deductible(receipt, category) do
+    # Simplified tax deduction calculation
+    case category do
+      "meals_and_entertainment" ->
+        # Meals typically 50% deductible
+        receipt.total * 0.5
+
+      "accommodation" ->
+        # Fully deductible
+        receipt.total
+
+      "transportation" ->
+        # Fully deductible
+        receipt.total
+
+      "office_supplies" ->
+        # Fully deductible
+        receipt.total
+
+      _ ->
+        0
+    end
+  end
+
+  defp generate_tags(receipt) do
+    tags = []
+
+    # Add date-based tags
+    date = Date.from_iso8601!(receipt.transaction_date)
+    tags = tags ++ ["#{date.year}-Q#{div(date.month - 1, 3) + 1}"]
+
+    # Add amount-based tags
+    tags = if receipt.total > 100, do: tags ++ ["high-value"], else: tags
+
+    # Add merchant tag
+    tags ++ [String.downcase(String.replace(receipt.merchant_name, " ", "-"))]
+  end
+
+  @doc """
+  Export receipts to CSV for accounting software.
+  """
+  def export_to_csv(categorized_receipts, file_path) do
+    rows = [
+      ["Date", "Merchant", "Category", "Amount", "Tax", "Total", "Currency",
+       "Reimbursable", "Deductible", "Tags"]
+    ]
+
+    data_rows = Enum.map(categorized_receipts, fn cat_receipt ->
+      receipt = cat_receipt.receipt
+      [
+        receipt.transaction_date,
+        receipt.merchant_name,
+        cat_receipt.expense_category,
+        to_string(receipt[:subtotal] || receipt.total),
+        to_string(receipt[:tax] || 0),
+        to_string(receipt.total),
+        receipt.currency,
+        to_string(cat_receipt.is_reimbursable),
+        to_string(cat_receipt.deductible_amount),
+        Enum.join(cat_receipt.tags, "; ")
+      ]
+    end)
+
+    csv_data = (rows ++ data_rows)
+    |> Enum.map(&Enum.join(&1, ","))
+    |> Enum.join("\n")
+
+    File.write!(file_path, csv_data)
+    {:ok, file_path}
+  end
+end
+```
+
+## Expense Categorization Example
+
+```elixir
+# Categorize our example receipts
+categorized = ExpenseManager.categorize_expense(receipt)
+
+IO.inspect(categorized, label: "Categorized Expense")
+
+IO.puts("\nExpense Details:")
+IO.puts("Category: #{categorized.expense_category}")
+IO.puts("Reimbursable: #{categorized.is_reimbursable}")
+IO.puts("Deductible amount: $#{Float.round(categorized.deductible_amount, 2)}")
+IO.puts("Requires approval: #{categorized.requires_approval}")
+IO.puts("Tags: #{Enum.join(categorized.tags, ", ")}")
+
+# Export multiple receipts to CSV
+categorized_receipts = [
+  ExpenseManager.categorize_expense(receipt),
+  ExpenseManager.categorize_expense(mock_retail_receipt),
+  ExpenseManager.categorize_expense(mock_restaurant_receipt)
+]
+
+csv_path = Path.join(System.tmp_dir!(), "expenses.csv")
+{:ok, path} = ExpenseManager.export_to_csv(categorized_receipts, csv_path)
+
+IO.puts("\nExported to: #{path}")
+IO.puts("\nCSV Contents:")
+IO.puts(File.read!(path))
+```
+
+## Example 5: Receipt Quality Assessment
+
+Assess receipt image quality before processing:
+
+```elixir
+defmodule ReceiptQualityChecker do
+  @moduledoc """
+  Assess receipt image quality and readability.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  def quality_assessment_schema do
+    Schema.new(%{
+      readable: %{
+        type: :boolean,
+        required: true,
+        description: "Is the receipt text readable?"
+      },
+      quality_score: %{
+        type: :integer,
+        required: true,
+        min: 1,
+        max: 10,
+        description: "Overall quality score (1-10)"
+      },
+      issues: %{
+        type: {:array, %{
+          type: {:enum, [
+            "poor_lighting",
+            "blurry",
+            "cut_off",
+            "faded",
+            "torn",
+            "wrinkled",
+            "angled",
+            "low_resolution",
+            "glare"
+          ]}
+        }},
+        required: false,
+        description: "Quality issues detected"
+      },
+      confidence: %{
+        type: {:enum, ["high", "medium", "low"]},
+        required: true,
+        description: "Confidence in extraction success"
+      },
+      recommendations: %{
+        type: {:array, %{type: :string, max_length: 100}},
+        required: false,
+        description: "Recommendations for better image quality"
+      }
+    })
+  end
+
+  def assess_quality(image_path, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    {:ok, image_data} = File.read(image_path)
+    base64_image = Base.encode64(image_data)
+
+    messages = [
+      %{
+        role: "user",
+        content: [
+          %{
+            type: "image",
+            source: %{
+              type: "base64",
+              media_type: "image/jpeg",
+              data: base64_image
+            }
+          },
+          %{
+            type: "text",
+            text: """
+            Assess the quality of this receipt image for data extraction. Evaluate:
+            - Is the text readable?
+            - What is the overall quality (1-10)?
+            - What issues are present (lighting, blur, etc.)?
+            - How confident are you that extraction will succeed?
+            - What recommendations would improve the image?
+            """
+          }
+        ]
+      }
+    ]
+
+    schema = quality_assessment_schema()
+
+    Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages
+    )
+  end
+end
+```
+
+## Production Integration Example
+
+Complete workflow for receipt processing application:
+
+```elixir
+defmodule ReceiptProcessingWorkflow do
+  @moduledoc """
+  Production workflow for receipt processing.
+  """
+
+  require Logger
+
+  def process_receipt_upload(upload_path, user_id, opts \\ []) do
+    Logger.info("Processing receipt upload for user #{user_id}")
+
+    with {:ok, quality} <- assess_quality(upload_path, opts),
+         :ok <- check_quality_threshold(quality),
+         {:ok, receipt_data} <- extract_receipt_data(upload_path, opts),
+         {:ok, categorized} <- categorize_and_validate(receipt_data),
+         {:ok, saved} <- save_to_database(categorized, user_id, upload_path) do
+
+      # Trigger follow-up actions
+      notify_user(user_id, saved)
+      update_expense_reports(user_id, saved)
+
+      {:ok, saved}
+    else
+      {:error, :poor_quality, quality} ->
+        Logger.warning("Poor receipt quality: #{inspect(quality.issues)}")
+        {:error, :poor_quality, quality.recommendations}
+
+      {:error, reason} = error ->
+        Logger.error("Receipt processing failed: #{inspect(reason)}")
+        error
+    end
+  end
+
+  defp assess_quality(upload_path, _opts) do
+    # In production, call ReceiptQualityChecker.assess_quality/2
+    {:ok, %{readable: true, quality_score: 8, confidence: "high"}}
+  end
+
+  defp check_quality_threshold(quality) do
+    if quality.quality_score >= 5 and quality.readable do
+      :ok
+    else
+      {:error, :poor_quality, quality}
+    end
+  end
+
+  defp extract_receipt_data(upload_path, opts) do
+    ReceiptExtractor.extract_from_image(upload_path,
+      backend: ExOutlines.Backend.Anthropic,
+      backend_opts: [
+        api_key: System.get_env("ANTHROPIC_API_KEY"),
+        model: "claude-3-5-sonnet-20241022"
+      ] ++ Keyword.get(opts, :backend_opts, [])
+    )
+  end
+
+  defp categorize_and_validate(receipt_data) do
+    categorized = ExpenseManager.categorize_expense(receipt_data)
+
+    # Additional validation
+    if categorized.requires_approval do
+      # Flag for manager approval
+      categorized = Map.put(categorized, :status, :pending_approval)
+    end
+
+    {:ok, categorized}
+  end
+
+  defp save_to_database(categorized, user_id, image_path) do
+    # Save to your database
+    # YourApp.Receipts.create(%{
+    #   user_id: user_id,
+    #   receipt_data: categorized.receipt,
+    #   category: categorized.expense_category,
+    #   image_path: image_path,
+    #   processed_at: DateTime.utc_now()
+    # })
+
+    {:ok, categorized}
+  end
+
+  defp notify_user(_user_id, _receipt) do
+    # Send notification to user
+    :ok
+  end
+
+  defp update_expense_reports(_user_id, _receipt) do
+    # Update monthly expense reports
+    :ok
+  end
+end
+```
+
+## Error Handling and Retry Strategies
+
+Handle common receipt processing errors:
+
+```elixir
+defmodule ReceiptErrorHandler do
+  @moduledoc """
+  Handle errors and edge cases in receipt processing.
+  """
+
+  def handle_extraction_error({:error, reason}, image_path, attempt \\ 1) do
+    max_attempts = 3
+
+    Logger.warning("Receipt extraction failed (attempt #{attempt}): #{inspect(reason)}")
+
+    cond do
+      attempt >= max_attempts ->
+        # Give up after max attempts
+        {:error, :max_retries_exceeded}
+
+      reason == :timeout ->
+        # Retry with longer timeout
+        Process.sleep(1000 * attempt)
+        retry_extraction(image_path, attempt + 1, timeout: 60_000)
+
+      reason == :poor_quality ->
+        # Try with simplified schema
+        retry_extraction(image_path, attempt + 1, schema: :simple)
+
+      true ->
+        # Generic retry with exponential backoff
+        Process.sleep(1000 * :math.pow(2, attempt))
+        retry_extraction(image_path, attempt + 1)
+    end
+  end
+
+  defp retry_extraction(image_path, attempt, opts \\ []) do
+    case ReceiptExtractor.extract_from_image(image_path, opts) do
+      {:ok, data} -> {:ok, data}
+      {:warning, data, warnings} -> {:ok, data}
+      error -> handle_extraction_error(error, image_path, attempt)
+    end
+  end
+
+  def validate_and_fix(receipt_data) do
+    # Common data fixes
+    fixed_data = receipt_data
+    |> fix_date_format()
+    |> fix_negative_values()
+    |> fix_currency()
+    |> calculate_missing_totals()
+
+    {:ok, fixed_data}
+  end
+
+  defp fix_date_format(receipt) do
+    # Ensure date is in YYYY-MM-DD format
+    # This is a simplified example
+    receipt
+  end
+
+  defp fix_negative_values(receipt) do
+    # Ensure amounts are positive
+    Map.update(receipt, :total, 0, &abs/1)
+    |> Map.update(:subtotal, 0, &abs/1)
+    |> Map.update(:tax, 0, &abs/1)
+  end
+
+  defp fix_currency(receipt) do
+    # Default to USD if currency missing
+    if Map.has_key?(receipt, :currency) do
+      receipt
+    else
+      Map.put(receipt, :currency, "USD")
+    end
+  end
+
+  defp calculate_missing_totals(receipt) do
+    # Calculate missing values from available data
+    if !Map.has_key?(receipt, :subtotal) && Map.has_key?(receipt, :items) do
+      subtotal = Enum.reduce(receipt.items, 0, &(&1.total_price + &2))
+      Map.put(receipt, :subtotal, subtotal)
+    else
+      receipt
+    end
+  end
+end
+```
+
+## Performance Monitoring
+
+Monitor receipt processing metrics:
+
+```elixir
+defmodule ReceiptMetrics do
+  @moduledoc """
+  Track receipt processing metrics.
+  """
+
+  def track_processing(receipt_data, duration_ms, quality_score) do
+    metrics = %{
+      duration_ms: duration_ms,
+      quality_score: quality_score,
+      item_count: length(receipt_data[:items] || []),
+      amount: receipt_data.total,
+      currency: receipt_data.currency,
+      has_tax: Map.has_key?(receipt_data, :tax),
+      has_tip: Map.has_key?(receipt_data, :tip)
+    }
+
+    :telemetry.execute(
+      [:ex_outlines, :receipt, :processed],
+      %{duration: duration_ms, amount: receipt_data.total},
+      metrics
+    )
+
+    # Track accuracy
+    if Map.has_key?(receipt_data, :items) do
+      track_line_item_accuracy(receipt_data)
+    end
+  end
+
+  defp track_line_item_accuracy(receipt_data) do
+    calculated = Enum.reduce(receipt_data.items, 0, &(&1.total_price + &2))
+    actual = receipt_data.subtotal
+    accuracy = 1 - abs(calculated - actual) / actual
+
+    :telemetry.execute(
+      [:ex_outlines, :receipt, :accuracy],
+      %{accuracy: accuracy},
+      %{item_count: length(receipt_data.items)}
+    )
+  end
+end
+```
+
+## Summary
+
+This notebook demonstrated digitizing receipts using vision-language models with ExOutlines. Key takeaways:
+
+1. **Flexible Schemas**: Design schemas for different receipt types (retail, restaurant, simple)
+2. **Total Validation**: Verify that line items sum correctly to subtotals and totals
+3. **Batch Processing**: Efficiently process multiple receipts concurrently
+4. **Expense Management**: Categorize expenses and calculate deductibles
+5. **Quality Assessment**: Check image quality before extraction
+6. **Error Handling**: Implement retry strategies and data fixes
+7. **CSV Export**: Export data for accounting and analysis
+8. **Production Workflow**: Complete integration for real applications
+
+Vision-language models excel at handling receipt variations in layout, quality, and format. Combined with ExOutlines validation, you get reliable structured data extraction.
+
+Next steps:
+- Integrate with expense management systems (Expensify, Concur)
+- Add OCR fallback for very poor quality images
+- Implement duplicate detection
+- Build mobile app for instant receipt capture
+- Add support for international receipts and currencies
+- Create analytics dashboards for spending patterns

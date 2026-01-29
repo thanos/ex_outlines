@@ -1,0 +1,778 @@
+# ReAct Agent: Reasoning + Acting
+
+## Introduction
+
+ReAct (Reason + Act) is a prompting pattern that combines reasoning traces with action execution. Unlike simple question-answering, ReAct agents can request external tool usage, observe results, and incorporate feedback into their reasoning.
+
+**Research Foundation**: Based on "ReAct: Synergizing Reasoning and Acting in Language Models" (Yao et al., 2022).
+
+**Learning Objectives:**
+
+* Build agents that can use external tools
+* Implement Thought-Action-Observation loops
+* Handle multi-turn agent interactions
+* Integrate structured generation with tool execution
+* Debug agent reasoning and decisions
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:req, "~> 0.4"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Understanding ReAct
+
+Traditional Q&A:
+> Q: What is the population of Tokyo?
+> A: Approximately 14 million (might be wrong or outdated)
+
+ReAct Agent:
+> **Thought**: I need current population data for Tokyo.
+> **Action**: search_wikipedia("Tokyo population")
+> **Observation**: "Tokyo has a population of approximately 14 million as of 2023..."
+> **Thought**: I have the current information.
+> **Final Answer**: Tokyo has a population of approximately 14 million people.
+
+The agent explicitly reasons about what actions to take and learns from observations.
+
+## ReAct Agent Schema
+
+Define schemas for the agent's decision-making process.
+
+```elixir
+# Available actions the agent can take
+action_enum = ["search_wikipedia", "calculate", "final_answer"]
+
+# Schema for continuing the reasoning loop
+reasoning_action_schema =
+  Schema.new(%{
+    scratchpad: %{
+      type: :string,
+      required: false,
+      max_length: 500,
+      description: "Notes or information to remember for answering the question"
+    },
+    thought: %{
+      type: :string,
+      required: true,
+      min_length: 10,
+      max_length: 300,
+      description: "Current reasoning about what to do next"
+    },
+    action: %{
+      type: {:enum, ["search_wikipedia", "calculate"]},
+      required: true,
+      description: "Tool to execute"
+    },
+    action_input: %{
+      type: :string,
+      required: true,
+      min_length: 1,
+      max_length: 200,
+      description: "Input for the selected action"
+    }
+  })
+
+# Schema for terminating with final answer
+final_answer_schema =
+  Schema.new(%{
+    thought: %{
+      type: :string,
+      required: true,
+      min_length: 10,
+      max_length: 300,
+      description: "Final reasoning before answering"
+    },
+    final_answer: %{
+      type: :string,
+      required: true,
+      min_length: 5,
+      max_length: 500,
+      description: "The complete answer to the question"
+    }
+  })
+
+# Union schema: agent can choose to continue or answer
+agent_decision_schema =
+  Schema.new(%{
+    decision_type: %{
+      type: {:enum, ["continue", "answer"]},
+      required: true,
+      description: "Whether to continue reasoning or provide final answer"
+    },
+    content: %{
+      type:
+        {:union, [%{type: {:object, reasoning_action_schema}}, %{type: {:object, final_answer_schema}}]},
+      required: true,
+      description: "Either reasoning_action or final_answer based on decision_type"
+    }
+  })
+
+IO.puts("ReAct agent schemas defined")
+:ok
+```
+
+## Implementing Agent Tools
+
+Create the tools the agent can use.
+
+```elixir
+defmodule AgentTools do
+  @moduledoc """
+  Tools available to the ReAct agent.
+  """
+
+  @doc """
+  Search Wikipedia for information.
+  """
+  def search_wikipedia(query) do
+    # Wikipedia API endpoint
+    url = "https://en.wikipedia.org/w/api.php"
+
+    params = [
+      action: "query",
+      list: "search",
+      srsearch: query,
+      format: "json",
+      srlimit: 1
+    ]
+
+    case Req.get(url, params: params) do
+      {:ok, %{status: 200, body: body}} ->
+        extract_snippet(body)
+
+      {:error, reason} ->
+        {:error, "Wikipedia search failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp extract_snippet(body) do
+    case body do
+      %{"query" => %{"search" => [first | _]}} ->
+        # Remove HTML tags from snippet
+        snippet =
+          first["snippet"]
+          |> String.replace(~r/<[^>]*>/, "")
+          |> String.replace("&quot;", "\"")
+
+        {:ok, "#{first["title"]}: #{snippet}"}
+
+      _ ->
+        {:error, "No results found"}
+    end
+  end
+
+  @doc """
+  Perform mathematical calculations.
+  """
+  def calculate(expression) do
+    # WARNING: eval() is dangerous in production! Use a proper math parser.
+    # This is for demonstration only.
+    try do
+      # Simple arithmetic only
+      if Regex.match?(~r/^[\d\s\+\-\*\/\(\)\.]+$/, expression) do
+        {result, _} = Code.eval_string(expression)
+        {:ok, "#{expression} = #{result}"}
+      else
+        {:error, "Invalid expression (only basic arithmetic allowed)"}
+      end
+    rescue
+      e -> {:error, "Calculation error: #{inspect(e)}"}
+    end
+  end
+
+  @doc """
+  Execute an action and return observation.
+  """
+  def execute(action, input) do
+    case action do
+      "search_wikipedia" ->
+        search_wikipedia(input)
+
+      "calculate" ->
+        calculate(input)
+
+      _ ->
+        {:error, "Unknown action: #{action}"}
+    end
+  end
+end
+
+# Test the tools
+IO.puts("\n=== Testing Agent Tools ===")
+
+{:ok, wiki_result} = AgentTools.search_wikipedia("Elixir programming language")
+IO.puts("\nWikipedia: #{wiki_result}")
+
+{:ok, calc_result} = AgentTools.calculate("(15 + 5) * 2")
+IO.puts("\nCalculation: #{calc_result}")
+
+:ok
+```
+
+## ReAct Agent Loop
+
+Implement the agent's reasoning and action loop.
+
+```elixir
+defmodule ReActAgent do
+  @moduledoc """
+  ReAct agent that reasons and acts in a loop.
+  """
+
+  @max_turns 5
+
+  def run(question, api_key, model, max_turns \\ @max_turns) do
+    IO.puts("\n" <> String.duplicate("=", 70))
+    IO.puts("ReAct Agent Starting")
+    IO.puts(String.duplicate("=", 70))
+    IO.puts("\nQuestion: #{question}\n")
+
+    initial_state = %{
+      question: question,
+      conversation: [],
+      turn: 0
+    }
+
+    agent_loop(initial_state, api_key, model, max_turns)
+  end
+
+  defp agent_loop(state, api_key, model, max_turns) do
+    if state.turn >= max_turns do
+      IO.puts("\nReached maximum turns (#{max_turns})")
+      {:error, :max_turns_reached}
+    else
+      # Generate agent decision
+      case generate_decision(state, api_key, model) do
+        {:continue, reasoning_action} ->
+          # Execute action and observe result
+          case AgentTools.execute(reasoning_action.action, reasoning_action.action_input) do
+            {:ok, observation} ->
+              IO.puts("\n--- Turn #{state.turn + 1} ---")
+              IO.puts("Thought: #{reasoning_action.thought}")
+              IO.puts("Action: #{reasoning_action.action}(\"#{reasoning_action.action_input}\")")
+              IO.puts("Observation: #{observation}")
+
+              # Update state with new information
+              new_conversation =
+                state.conversation ++
+                  [
+                    %{
+                      type: :reasoning,
+                      thought: reasoning_action.thought,
+                      action: reasoning_action.action,
+                      input: reasoning_action.action_input,
+                      observation: observation
+                    }
+                  ]
+
+              new_state = %{state | conversation: new_conversation, turn: state.turn + 1}
+              agent_loop(new_state, api_key, model, max_turns)
+
+            {:error, reason} ->
+              IO.puts("\nAction failed: #{reason}")
+              {:error, reason}
+          end
+
+        {:answer, final_answer} ->
+          IO.puts("\n--- Final Turn #{state.turn + 1} ---")
+          IO.puts("Thought: #{final_answer.thought}")
+          IO.puts("\n" <> String.duplicate("=", 70))
+          IO.puts("FINAL ANSWER")
+          IO.puts(String.duplicate("=", 70))
+          IO.puts("\n#{final_answer.final_answer}\n")
+          {:ok, final_answer.final_answer}
+
+        {:error, reason} ->
+          IO.puts("\nGeneration failed: #{inspect(reason)}")
+          {:error, reason}
+      end
+    end
+  end
+
+  defp generate_decision(state, _api_key, _model) do
+    # In production, this would call the LLM:
+    # prompt = build_prompt(state)
+    # {:ok, decision} = ExOutlines.generate(agent_decision_schema,
+    #   backend: HTTP,
+    #   backend_opts: [
+    #     api_key: api_key,
+    #     model: model,
+    #     messages: [
+    #       %{role: "system", content: "You are a helpful agent that reasons and acts."},
+    #       %{role: "user", content: prompt}
+    #     ]
+    #   ]
+    # )
+
+    # For demonstration, simulate agent decisions
+    simulate_decision(state)
+  end
+
+  defp simulate_decision(state) do
+    cond do
+      state.turn == 0 ->
+        # First turn: search for information
+        {:continue,
+         %{
+           thought: "I need to find information about the question.",
+           action: "search_wikipedia",
+           action_input: state.question
+         }}
+
+      state.turn == 1 and String.contains?(state.question, ["calculate", "how many", "how much"]) ->
+        # If question involves calculation, use calculator
+        {:continue,
+         %{
+           thought: "I need to perform a calculation based on the information.",
+           action: "calculate",
+           action_input: "10 * 5"
+         }}
+
+      true ->
+        # After gathering information, provide answer
+        observations =
+          state.conversation
+          |> Enum.map(fn conv -> conv.observation end)
+          |> Enum.join(" ")
+
+        {:answer,
+         %{
+           thought:
+             "I have gathered enough information from my searches and calculations to answer the question.",
+           final_answer: "Based on my research: #{String.slice(observations, 0, 200)}..."
+         }}
+    end
+  end
+
+  defp build_prompt(state) do
+    conversation_history =
+      state.conversation
+      |> Enum.map(fn conv ->
+        """
+        Thought: #{conv.thought}
+        Action: #{conv.action}("#{conv.input}")
+        Observation: #{conv.observation}
+        """
+      end)
+      |> Enum.join("\n")
+
+    """
+    You are an agent that answers questions by reasoning and taking actions.
+
+    Available actions:
+    - search_wikipedia(query): Search Wikipedia for information
+    - calculate(expression): Perform mathematical calculations
+
+    Question: #{state.question}
+
+    #{if conversation_history != "", do: "Previous turns:\n#{conversation_history}\n"}
+
+    Decide your next action or provide the final answer.
+    If you need more information, choose an action.
+    If you have enough information, provide the final answer.
+    """
+  end
+end
+
+# Run a demonstration agent
+question = "What is the population of Paris and how does it compare to London?"
+ReActAgent.run(question, api_key, model, max_turns: 3)
+```
+
+## Example: Multi-Step Question
+
+Let's trace through a complex question requiring multiple steps.
+
+```elixir
+# Example execution trace for:
+# "What year was the creator of Elixir born, and how old would they be in 2024?"
+
+example_trace = [
+  %{
+    turn: 1,
+    thought: "I need to find out who created Elixir.",
+    action: "search_wikipedia",
+    action_input: "Elixir programming language creator",
+    observation:
+      "Elixir: Elixir is a functional programming language that runs on the Erlang virtual machine. It was created by José Valim in 2011..."
+  },
+  %{
+    turn: 2,
+    thought: "Now I know José Valim created Elixir. I need to find his birth year.",
+    action: "search_wikipedia",
+    action_input: "José Valim birth year",
+    observation: "José Valim: Brazilian software developer born in 1983..."
+  },
+  %{
+    turn: 3,
+    thought: "José Valim was born in 1983. Now I need to calculate his age in 2024.",
+    action: "calculate",
+    action_input: "2024 - 1983",
+    observation: "2024 - 1983 = 41"
+  },
+  %{
+    turn: 4,
+    thought: "I have all the information needed to answer the question.",
+    final_answer:
+      "José Valim, the creator of Elixir, was born in 1983. He would be 41 years old in 2024."
+  }
+]
+
+IO.puts("\n=== Example: Multi-Step Reasoning ===")
+IO.puts("\nQuestion: What year was the creator of Elixir born, and how old would they be in 2024?")
+
+Enum.each(example_trace, fn step ->
+  IO.puts("\n--- Turn #{step.turn} ---")
+  IO.puts("Thought: #{step.thought}")
+
+  if step[:action] do
+    IO.puts("Action: #{step.action}(\"#{step.action_input}\")")
+    IO.puts("Observation: #{step.observation}")
+  else
+    IO.puts("\nFinal Answer: #{step.final_answer}")
+  end
+end)
+```
+
+## Agent Decision Flowchart
+
+```elixir
+IO.puts("""
+
+=== ReAct Agent Decision Flow ===
+
+1. Receive Question
+   ↓
+2. Generate Thought (What do I need to know?)
+   ↓
+3. Make Decision
+   ├─→ Need Information?
+   │   ├─→ Choose Action (search_wikipedia or calculate)
+   │   ├─→ Execute Action
+   │   ├─→ Observe Result
+   │   └─→ Back to Step 2
+   │
+   └─→ Have Enough Information?
+       └─→ Generate Final Answer
+           └─→ Done
+
+Maximum Turns: 5 (prevents infinite loops)
+""")
+```
+
+## Implementing Tool Descriptions
+
+Help the agent choose the right tool.
+
+```elixir
+defmodule ToolRegistry do
+  @moduledoc """
+  Registry of available tools with descriptions.
+  """
+
+  def tools do
+    [
+      %{
+        name: "search_wikipedia",
+        description: "Search Wikipedia for factual information about topics, people, places, etc.",
+        examples: [
+          "search_wikipedia('Elixir programming language')",
+          "search_wikipedia('Paris population')",
+          "search_wikipedia('Albert Einstein birth year')"
+        ],
+        when_to_use: "When you need factual information about real-world topics"
+      },
+      %{
+        name: "calculate",
+        description: "Perform mathematical calculations with basic arithmetic operations",
+        examples: [
+          "calculate('2024 - 1983')",
+          "calculate('(100 + 50) * 2')",
+          "calculate('15 / 3')"
+        ],
+        when_to_use: "When you need to compute numerical results"
+      }
+    ]
+  end
+
+  def tool_descriptions do
+    tools()
+    |> Enum.map(fn tool ->
+      """
+      #{tool.name}:
+        Description: #{tool.description}
+        When to use: #{tool.when_to_use}
+        Examples: #{Enum.join(tool.examples, ", ")}
+      """
+    end)
+    |> Enum.join("\n")
+  end
+end
+
+IO.puts("\n=== Available Tools ===")
+IO.puts(ToolRegistry.tool_descriptions())
+```
+
+## Error Handling and Recovery
+
+Agents need to handle tool failures gracefully.
+
+```elixir
+defmodule RobustReActAgent do
+  @doc """
+  Agent with error handling and recovery.
+  """
+  def run_with_retry(question, api_key, model) do
+    case ReActAgent.run(question, api_key, model) do
+      {:ok, answer} ->
+        {:ok, answer}
+
+      {:error, :max_turns_reached} ->
+        # Agent couldn't solve in time
+        {:error, "Could not answer within maximum turns. Try simplifying the question."}
+
+      {:error, reason} ->
+        # Other errors
+        {:error, "Agent failed: #{inspect(reason)}"}
+    end
+  end
+
+  @doc """
+  Validate tool inputs before execution.
+  """
+  def validate_action(action, input) do
+    case action do
+      "search_wikipedia" ->
+        if String.length(input) >= 3 and String.length(input) <= 200 do
+          :ok
+        else
+          {:error, "Wikipedia query must be 3-200 characters"}
+        end
+
+      "calculate" ->
+        if Regex.match?(~r/^[\d\s\+\-\*\/\(\)\.]+$/, input) do
+          :ok
+        else
+          {:error, "Calculation must only contain numbers and operators"}
+        end
+
+      _ ->
+        {:error, "Unknown action"}
+    end
+  end
+end
+
+# Test validation
+IO.puts("\n=== Action Validation ===")
+
+case RobustReActAgent.validate_action("search_wikipedia", "Elixir") do
+  :ok -> IO.puts("Valid search query")
+  {:error, msg} -> IO.puts("Invalid: #{msg}")
+end
+
+case RobustReActAgent.validate_action("calculate", "2 + 2; system('rm -rf /')") do
+  :ok -> IO.puts("Valid calculation")
+  {:error, msg} -> IO.puts("Invalid: #{msg}")
+end
+```
+
+## Production ReAct Implementation
+
+```elixir
+defmodule ProductionReActAgent do
+  @moduledoc """
+  Production-ready ReAct agent with full LLM integration.
+  """
+
+  def run(question, opts \\ []) do
+    config = %{
+      api_key: Keyword.fetch!(opts, :api_key),
+      model: Keyword.get(opts, :model, "gpt-4o-mini"),
+      max_turns: Keyword.get(opts, :max_turns, 5),
+      timeout: Keyword.get(opts, :timeout, 30_000)
+    }
+
+    initial_state = %{
+      question: question,
+      conversation: [],
+      turn: 0
+    }
+
+    run_loop(initial_state, config)
+  end
+
+  defp run_loop(state, config) do
+    if state.turn >= config.max_turns do
+      {:error, :max_turns, state.conversation}
+    else
+      prompt = build_prompt(state, config)
+
+      # Generate agent decision with LLM
+      case generate_with_llm(prompt, config) do
+        {:continue, action} ->
+          # Execute and continue
+          case execute_action(action) do
+            {:ok, observation} ->
+              new_state = update_state(state, action, observation)
+              run_loop(new_state, config)
+
+            {:error, reason} ->
+              {:error, reason, state.conversation}
+          end
+
+        {:answer, final} ->
+          {:ok, final.final_answer, state.conversation}
+
+        {:error, reason} ->
+          {:error, reason, state.conversation}
+      end
+    end
+  end
+
+  defp generate_with_llm(prompt, config) do
+    # Real implementation would call ExOutlines.generate
+    # with agent_decision_schema
+    :simulated
+  end
+
+  defp execute_action(action) do
+    AgentTools.execute(action.action, action.action_input)
+  end
+
+  defp update_state(state, action, observation) do
+    new_conversation =
+      state.conversation ++
+        [
+          %{
+            thought: action.thought,
+            action: action.action,
+            input: action.action_input,
+            observation: observation
+          }
+        ]
+
+    %{state | conversation: new_conversation, turn: state.turn + 1}
+  end
+
+  defp build_prompt(state, _config) do
+    # Build comprehensive prompt with history
+    # Include tool descriptions
+    # Format conversation history
+    "..."
+  end
+end
+```
+
+## Key Takeaways
+
+**ReAct Pattern:**
+
+* Thought: Reason about what to do next
+* Action: Choose and execute a tool
+* Observation: Learn from the result
+* Repeat until question is answered
+
+**When to Use:**
+
+* Questions requiring external information
+* Multi-step problem solving
+* Tasks needing calculations
+* Situations where reasoning alone isn't enough
+
+**Schema Design:**
+
+* Union types for decision branches (continue vs. answer)
+* Enum for available actions
+* Structured thought and observation capture
+* Maximum turn limit for safety
+
+**Production Tips:**
+
+* Validate tool inputs before execution
+* Handle tool failures gracefully
+* Set reasonable turn limits
+* Log complete conversation history
+* Monitor token usage (each turn adds context)
+* Cache tool results when appropriate
+
+**Common Pitfalls:**
+
+* Infinite loops (always set max_turns)
+* Expensive tool calls (cache results)
+* Unclear tool descriptions (agent makes wrong choices)
+* Missing error handling (tools can fail)
+* Too many tools (agent gets confused)
+
+## Real-World Applications
+
+**Customer Support:**
+- Agent searches knowledge base
+- Calculates refunds or credits
+- Looks up order status
+- Provides contextual answers
+
+**Research Assistant:**
+- Searches multiple sources
+- Combines information
+- Performs calculations
+- Cites sources
+
+**Data Analysis:**
+- Queries databases
+- Performs calculations
+- Generates insights
+- Creates visualizations
+
+**Task Automation:**
+- Reads documentation
+- Executes API calls
+- Processes results
+- Takes next actions
+
+## Challenges
+
+Try these exercises:
+
+1. Add more tools (web search, database query, file read)
+2. Implement tool result caching
+3. Add agent memory (remember across sessions)
+4. Build a planning phase before execution
+5. Create specialized agents for different domains
+6. Implement multi-agent collaboration
+
+## Next Steps
+
+* Try the **Chain of Thought** notebook for pure reasoning
+* Explore the **SimToM** notebook for perspective-aware agents
+* Read the **Schema Patterns** guide for complex agent schemas
+* Check the **Error Handling** guide for robust agent implementations
+
+## Further Reading
+
+* [ReAct Paper](https://arxiv.org/abs/2210.03629)
+* [LangChain Agents Documentation](https://python.langchain.com/docs/modules/agents/)
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)

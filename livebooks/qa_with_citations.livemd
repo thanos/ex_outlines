@@ -1,0 +1,697 @@
+# Question Answering with Citations
+
+## Introduction
+
+This notebook demonstrates how to build a question-answering system that provides cited, verifiable answers. Unlike simple Q&A, this approach ensures responses are grounded in source material and includes proper citations.
+
+**Use Cases:**
+
+* Research assistance tools
+* Customer support with documentation
+* Educational platforms
+* Legal or medical information systems
+* Fact-checking applications
+* Internal knowledge bases
+
+**Learning Objectives:**
+
+* Structure answers with citations
+* Extract relevant passages from documents
+* Validate citation format
+* Handle multiple sources
+* Build trustworthy Q&A systems
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Why Citations Matter
+
+Without citations:
+
+> "Elixir is a functional programming language that runs on the BEAM VM. It has excellent concurrency support."
+
+With citations:
+
+> "Elixir is a functional programming language that runs on the BEAM VM [1]. It has excellent concurrency support through lightweight processes [2]."
+>
+> **Citations:**
+> [1] Official Elixir website: "Elixir is a dynamic, functional language for building scalable applications"
+> [2] Programming Elixir, Dave Thomas, p. 23: "Elixir processes are lightweight and isolated"
+
+Citations provide:
+
+* Verifiability
+* Accountability
+* Confidence in accuracy
+* Ability to learn more
+* Protection against hallucination
+
+## Defining the Schema
+
+Let's create a schema for cited answers.
+
+```elixir
+# Citation schema
+citation_schema =
+  Schema.new(%{
+    id: %{
+      type: :integer,
+      required: true,
+      min: 1,
+      description: "Unique citation number (1, 2, 3, ...)"
+    },
+    source: %{
+      type: :string,
+      required: true,
+      min_length: 5,
+      max_length: 200,
+      description: "Source title, author, or URL"
+    },
+    quote: %{
+      type: :string,
+      required: true,
+      min_length: 10,
+      max_length: 500,
+      description: "Exact quote from the source that supports the statement"
+    },
+    page_or_section: %{
+      type: {:union, [%{type: :string}, %{type: :null}]},
+      required: false,
+      description: "Page number, section, or timestamp for reference"
+    }
+  })
+
+# Q&A with citations schema
+qa_with_citations_schema =
+  Schema.new(%{
+    question: %{
+      type: :string,
+      required: true,
+      description: "The original question being answered"
+    },
+    answer: %{
+      type: :string,
+      required: true,
+      min_length: 50,
+      max_length: 2000,
+      description: "Comprehensive answer with inline citation markers [1], [2], etc."
+    },
+    citations: %{
+      type: {:array, %{type: {:object, citation_schema}}},
+      required: true,
+      min_items: 1,
+      max_items: 10,
+      description: "List of citations supporting the answer"
+    },
+    confidence: %{
+      type: {:enum, ["high", "medium", "low"]},
+      required: true,
+      description: "Confidence level in the answer based on source quality"
+    },
+    caveats: %{
+      type: {:union, [%{type: {:array, %{type: :string}}}, %{type: :null}]},
+      required: false,
+      description: "Any limitations, caveats, or additional context"
+    }
+  })
+
+IO.puts("Schema defined")
+:ok
+```
+
+## Example 1: Technical Question
+
+Let's answer a technical question with proper citations.
+
+```elixir
+# Source documents (in production, these would come from a knowledge base)
+source_docs = """
+DOCUMENT 1: Elixir Official Documentation
+Title: Introduction to Elixir
+Content: Elixir is a dynamic, functional language for building scalable and maintainable
+applications. Elixir runs on the Erlang VM, known for creating low-latency, distributed,
+and fault-tolerant systems. These capabilities and Elixir tooling allow developers to be
+productive in several domains, such as web development, embedded software, and data pipelines.
+
+DOCUMENT 2: Programming Elixir by Dave Thomas
+Page 23: Elixir processes are lightweight (growing and shrinking dynamically based on load)
+and isolated, making them easy to manage. The BEAM VM can handle millions of processes
+simultaneously, each with its own state and executing concurrently.
+
+DOCUMENT 3: Elixir Forum Post
+Author: José Valim (Elixir creator)
+Date: 2023-05-15
+Content: One of Elixir's core strengths is its ability to handle concurrent operations
+efficiently through the Actor model. Each process is isolated, communicating only through
+message passing, which prevents shared state issues common in other languages.
+"""
+
+question = "How does Elixir handle concurrency and why is it well-suited for it?"
+
+# In production:
+# result = ExOutlines.generate(qa_with_citations_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "You answer questions with citations from provided sources."},
+#       %{role: "user", content: "Sources:\n#{source_docs}\n\nQuestion: #{question}"}
+#     ]
+#   ]
+# )
+
+# Expected answer with citations
+expected_answer = %{
+  "question" => question,
+  "answer" =>
+    "Elixir handles concurrency through lightweight processes that run on the Erlang VM (BEAM) [1]. These processes are isolated and communicate only through message passing, following the Actor model [3]. This isolation prevents shared state issues common in other languages [3]. The BEAM VM can handle millions of processes simultaneously, each with its own state executing concurrently [2]. The processes are dynamic, growing and shrinking based on load, which makes them efficient to manage [2]. This architecture makes Elixir particularly well-suited for building scalable, low-latency, distributed, and fault-tolerant systems [1].",
+  "citations" => [
+    %{
+      "id" => 1,
+      "source" => "Elixir Official Documentation - Introduction to Elixir",
+      "quote" =>
+        "Elixir runs on the Erlang VM, known for creating low-latency, distributed, and fault-tolerant systems",
+      "page_or_section" => nil
+    },
+    %{
+      "id" => 2,
+      "source" => "Programming Elixir by Dave Thomas",
+      "quote" =>
+        "Elixir processes are lightweight (growing and shrinking dynamically based on load) and isolated. The BEAM VM can handle millions of processes simultaneously",
+      "page_or_section" => "Page 23"
+    },
+    %{
+      "id" => 3,
+      "source" => "Elixir Forum - José Valim (2023-05-15)",
+      "quote" =>
+        "Each process is isolated, communicating only through message passing, which prevents shared state issues common in other languages",
+      "page_or_section" => nil
+    }
+  ],
+  "confidence" => "high",
+  "caveats" => nil
+}
+
+IO.puts("Question: #{question}\n")
+IO.puts("Answer with citations:")
+IO.inspect(expected_answer, pretty: true, limit: :infinity)
+
+# Validate
+case Spec.validate(qa_with_citations_schema, expected_answer) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Answer validated")
+
+    # Format output
+    IO.puts("\n=== Formatted Answer ===")
+    IO.puts("\nQ: #{validated.question}\n")
+    IO.puts("A: #{validated.answer}\n")
+    IO.puts("\nCitations:")
+
+    Enum.each(validated.citations, fn citation ->
+      IO.puts("\n[#{citation.id}] #{citation.source}")
+      IO.puts("    \"#{citation.quote}\"")
+      if citation.page_or_section, do: IO.puts("    #{citation.page_or_section}")
+    end)
+
+    IO.puts("\nConfidence: #{String.upcase(validated.confidence)}")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Example 2: Historical Question
+
+Let's handle a historical question with multiple perspectives.
+
+```elixir
+history_source_docs = """
+DOCUMENT 1: NASA Official History
+Title: The Space Race and Apollo Program
+Content: The Apollo 11 mission successfully landed humans on the Moon on July 20, 1969.
+Neil Armstrong became the first person to walk on the lunar surface, followed by Buzz Aldrin.
+The mission was a culmination of years of technological development and represented a major
+achievement in human space exploration.
+
+DOCUMENT 2: Smithsonian Air & Space Museum
+Exhibit: Moon Landing
+Content: The Apollo 11 landing required precise calculations and real-time adjustments.
+The lunar module, Eagle, touched down in the Sea of Tranquility with only seconds of fuel
+remaining. Armstrong's famous words, "That's one small step for man, one giant leap for mankind,"
+were broadcast to millions watching on Earth.
+
+DOCUMENT 3: Cold War Context
+Author: Dr. Sarah Chen, Historian
+Publication: Space Race Politics (2020)
+Content: The Moon landing was driven largely by Cold War competition between the United States
+and Soviet Union. President Kennedy's 1961 commitment to landing on the Moon "before this decade
+is out" was motivated by demonstrating technological superiority and boosting American prestige
+following Soviet space achievements like Sputnik and Yuri Gagarin's orbital flight.
+"""
+
+history_question = "What was the significance of the Apollo 11 Moon landing?"
+
+expected_history_answer = %{
+  "question" => history_question,
+  "answer" =>
+    "The Apollo 11 mission, which landed on the Moon on July 20, 1969, was significant for multiple reasons. Technically, it represented a major achievement in human space exploration, as Neil Armstrong and Buzz Aldrin became the first humans to walk on the lunar surface [1][2]. The mission required precise calculations and real-time adjustments, with the lunar module Eagle touching down with only seconds of fuel remaining [2]. Politically, the landing was driven by Cold War competition between the United States and Soviet Union, serving as a demonstration of technological superiority and boosting American prestige [3]. President Kennedy's 1961 commitment to reach the Moon \"before this decade is out\" was motivated by the need to respond to Soviet space achievements like Sputnik and Yuri Gagarin's orbital flight [3]. Armstrong's famous words, \"That's one small step for man, one giant leap for mankind,\" captured the global significance of the moment, broadcast to millions worldwide [2].",
+  "citations" => [
+    %{
+      "id" => 1,
+      "source" => "NASA Official History - The Space Race and Apollo Program",
+      "quote" =>
+        "The Apollo 11 mission successfully landed humans on the Moon on July 20, 1969. The mission represented a major achievement in human space exploration",
+      "page_or_section" => nil
+    },
+    %{
+      "id" => 2,
+      "source" => "Smithsonian Air & Space Museum - Moon Landing Exhibit",
+      "quote" =>
+        "The lunar module, Eagle, touched down in the Sea of Tranquility with only seconds of fuel remaining. Armstrong's famous words were broadcast to millions watching on Earth",
+      "page_or_section" => nil
+    },
+    %{
+      "id" => 3,
+      "source" => "Space Race Politics by Dr. Sarah Chen (2020)",
+      "quote" =>
+        "The Moon landing was driven largely by Cold War competition. Kennedy's 1961 commitment was motivated by demonstrating technological superiority and boosting American prestige",
+      "page_or_section" => "Chapter 4"
+    }
+  ],
+  "confidence" => "high",
+  "caveats" => [
+    "The geopolitical context presented here represents one perspective on the Moon landing's motivations",
+    "Technical details are simplified for general understanding"
+  ]
+}
+
+case Spec.validate(qa_with_citations_schema, expected_history_answer) do
+  {:ok, validated} ->
+    IO.puts("\n=== Formatted Answer ===")
+    IO.puts("\nQ: #{validated.question}\n")
+    IO.puts("A: #{validated.answer}\n")
+    IO.puts("\nCitations:")
+
+    Enum.each(validated.citations, fn citation ->
+      IO.puts("\n[#{citation.id}] #{citation.source}")
+      IO.puts("    \"#{citation.quote}\"")
+    end)
+
+    if validated.caveats do
+      IO.puts("\nCaveats:")
+
+      Enum.each(validated.caveats, fn caveat ->
+        IO.puts("  • #{caveat}")
+      end)
+    end
+
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Example 3: Insufficient Evidence
+
+What happens when sources don't fully support an answer?
+
+```elixir
+limited_sources = """
+DOCUMENT 1: Brief News Article
+Title: New Programming Language Released
+Content: A new programming language called "FutureLang" was announced yesterday.
+The creators claim it will revolutionize software development.
+"""
+
+ambitious_question =
+  "What are the technical advantages of FutureLang over existing programming languages?"
+
+# Honest answer acknowledging limitations
+expected_limited_answer = %{
+  "question" => ambitious_question,
+  "answer" =>
+    "Based on available sources, FutureLang is a new programming language that was recently announced [1]. The creators claim it will revolutionize software development [1]. However, the available sources do not provide specific technical details about its features, implementation, or concrete advantages over existing languages.",
+  "citations" => [
+    %{
+      "id" => 1,
+      "source" => "Brief News Article - New Programming Language Released",
+      "quote" =>
+        "A new programming language called FutureLang was announced yesterday. The creators claim it will revolutionize software development",
+      "page_or_section" => nil
+    }
+  ],
+  "confidence" => "low",
+  "caveats" => [
+    "Sources provide only high-level announcement information",
+    "No technical specifications or comparative analysis available",
+    "Claims about revolutionizing development are unsubstantiated in provided sources"
+  ]
+}
+
+IO.puts("Question with limited sources:")
+IO.puts(ambitious_question)
+
+case Spec.validate(qa_with_citations_schema, expected_limited_answer) do
+  {:ok, validated} ->
+    IO.puts("\n=== Honest Answer with Limitations ===")
+    IO.puts("\nA: #{validated.answer}\n")
+    IO.puts("Confidence: #{String.upcase(validated.confidence)}")
+    IO.puts("\nCaveats:")
+
+    Enum.each(validated.caveats, fn caveat ->
+      IO.puts("  • #{caveat}")
+    end)
+
+    IO.puts("\nThis demonstrates responsible Q&A: acknowledging limitations rather than hallucinating details.")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Citation Validation
+
+Let's create functions to validate citation quality.
+
+```elixir
+defmodule CitationValidator do
+  @doc """
+  Check if answer has proper citation markers [1], [2], etc.
+  """
+  def has_valid_markers?(answer, citation_count) do
+    # Check that markers exist and are sequential
+    markers = Regex.scan(~r/\[(\d+)\]/, answer) |> Enum.map(fn [_, num] -> String.to_integer(num) end)
+
+    sorted_unique = Enum.sort(Enum.uniq(markers))
+    expected = Enum.to_list(1..citation_count)
+
+    sorted_unique == expected
+  end
+
+  @doc """
+  Check if each citation has a meaningful quote.
+  """
+  def quotes_are_substantial?(citations) do
+    Enum.all?(citations, fn citation ->
+      String.length(citation.quote) >= 20
+    end)
+  end
+
+  @doc """
+  Check if sources are properly identified.
+  """
+  def sources_are_clear?(citations) do
+    Enum.all?(citations, fn citation ->
+      source_len = String.length(citation.source)
+      source_len >= 10 and source_len <= 200
+    end)
+  end
+
+  @doc """
+  Overall citation quality score.
+  """
+  def quality_score(qa_result) do
+    checks = [
+      {:markers, has_valid_markers?(qa_result.answer, length(qa_result.citations))},
+      {:quotes, quotes_are_substantial?(qa_result.citations)},
+      {:sources, sources_are_clear?(qa_result.citations)},
+      {:confidence, qa_result.confidence in ["high", "medium", "low"]}
+    ]
+
+    passed = Enum.count(checks, fn {_name, result} -> result end)
+    score = passed / length(checks)
+
+    %{
+      score: Float.round(score, 2),
+      checks: checks,
+      passed: passed,
+      total: length(checks)
+    }
+  end
+end
+
+# Validate the technical answer
+if expected_answer do
+  quality = CitationValidator.quality_score(expected_answer)
+
+  IO.puts("\n=== Citation Quality Report ===")
+  IO.puts("Score: #{quality.score * 100}%")
+  IO.puts("Checks passed: #{quality.passed}/#{quality.total}\n")
+
+  Enum.each(quality.checks, fn {name, passed} ->
+    status = if passed, do: "[PASS]", else: "[FAIL]"
+    IO.puts("#{status} #{name}")
+  end)
+end
+```
+
+## Batch Q&A Processing
+
+Process multiple questions concurrently.
+
+```elixir
+defmodule BatchQA do
+  def process_questions(questions, source_docs, opts \\ []) do
+    # In production:
+    # tasks = Enum.map(questions, fn question ->
+    #   prompt = build_qa_prompt(question, source_docs)
+    #   {qa_with_citations_schema, [
+    #     backend: HTTP,
+    #     backend_opts: [
+    #       api_key: opts[:api_key],
+    #       model: opts[:model] || "gpt-4o-mini",
+    #       messages: [
+    #         %{role: "system", content: "Answer questions with citations."},
+    #         %{role: "user", content: prompt}
+    #       ]
+    #     ]
+    #   ]}
+    # end)
+    #
+    # ExOutlines.generate_batch(tasks, max_concurrency: 5)
+
+    IO.puts("Would process #{length(questions)} questions concurrently")
+    IO.puts("Each answer would include proper citations")
+  end
+
+  defp build_qa_prompt(question, sources) do
+    """
+    Sources:
+    #{sources}
+
+    Question: #{question}
+
+    Provide a comprehensive answer with inline citations [1], [2], etc.
+    Include the full citation list with quotes from sources.
+    """
+  end
+end
+
+# Example batch
+questions = [
+  "What is Elixir and what VM does it run on?",
+  "How many processes can the BEAM VM handle?",
+  "What is the Actor model in Elixir?"
+]
+
+BatchQA.process_questions(questions, source_docs, api_key: api_key)
+```
+
+## Real-World Integration
+
+Here's how to integrate cited Q&A into a knowledge base system:
+
+```elixir
+# Phoenix controller for Q&A endpoint
+defmodule MyAppWeb.QAController do
+  use MyAppWeb, :controller
+  alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+  def ask(conn, %{"question" => question, "context_ids" => context_ids}) do
+    # Retrieve relevant documents
+    contexts = MyApp.Knowledge.get_documents(context_ids)
+    source_docs = format_sources(contexts)
+
+    # Generate answer with citations
+    case generate_cited_answer(question, source_docs) do
+      {:ok, qa_result} ->
+        # Validate citations
+        quality = CitationValidator.quality_score(qa_result)
+
+        if quality.score >= 0.75 do
+          # High quality answer
+          json(conn, %{
+            answer: qa_result.answer,
+            citations: qa_result.citations,
+            confidence: qa_result.confidence,
+            caveats: qa_result.caveats,
+            quality_score: quality.score
+          })
+        else
+          # Low quality, request more context
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            error: "Insufficient quality",
+            partial_answer: qa_result,
+            quality_issues: Enum.filter(quality.checks, fn {_, passed} -> !passed end)
+          })
+        end
+
+      {:error, reason} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "Generation failed", reason: inspect(reason)})
+    end
+  end
+
+  defp generate_cited_answer(question, source_docs) do
+    prompt = """
+    Sources:
+    #{source_docs}
+
+    Question: #{question}
+
+    Provide a comprehensive answer with citations.
+    """
+
+    ExOutlines.generate(qa_with_citations_schema(),
+      backend: HTTP,
+      backend_opts: [
+        api_key: System.get_env("OPENAI_API_KEY"),
+        model: "gpt-4o-mini",
+        messages: [
+          %{role: "system", content: "You answer questions with proper citations from sources."},
+          %{role: "user", content: prompt}
+        ]
+      ],
+      max_retries: 2,
+      timeout: 45_000
+    )
+  end
+
+  defp format_sources(contexts) do
+    contexts
+    |> Enum.with_index(1)
+    |> Enum.map(fn {doc, idx} ->
+      """
+      DOCUMENT #{idx}: #{doc.title}
+      Author: #{doc.author || "Unknown"}
+      Content: #{doc.content}
+      """
+    end)
+    |> Enum.join("\n\n")
+  end
+end
+```
+
+## Key Takeaways
+
+**Citation Best Practices:**
+
+* Always include inline markers [1], [2]
+* Provide exact quotes, not paraphrases
+* Include source identification (title, author, date)
+* Add page/section numbers when available
+* Acknowledge limitations explicitly
+
+**Schema Design:**
+
+* Require citations array with minimum 1 item
+* Validate citation IDs are sequential
+* Enforce quote length constraints
+* Include confidence levels
+* Allow caveats for transparency
+
+**Quality Assurance:**
+
+* Validate citation markers in answer
+* Check quotes are substantial
+* Verify sources are clearly identified
+* Score citation quality
+* Flag low-confidence answers
+
+**Production Considerations:**
+
+* Batch process multiple questions
+* Cache frequently asked questions
+* Monitor citation quality over time
+* Allow user feedback on accuracy
+* Have human review for critical domains
+
+**Handling Limitations:**
+
+* Be explicit about insufficient evidence
+* Don't hallucinate citations
+* Use "low" confidence appropriately
+* Include caveats when needed
+* Consider refusing to answer if sources inadequate
+
+## Challenges
+
+Try these exercises:
+
+1. Add support for conflicting sources (citations with different perspectives)
+2. Implement citation deduplication (same source quoted multiple times)
+3. Create a citation network visualization
+4. Build a fact-checking system that verifies claims against citations
+5. Add support for different citation formats (APA, MLA, Chicago)
+
+## Next Steps
+
+* Try the **Named Entity Extraction** notebook for information extraction
+* Explore the **Chain of Density** notebook for summarization
+* Read the **Error Handling** guide for production robustness
+* Check the **Batch Processing** guide for high-volume Q&A
+
+## Further Reading
+
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Testing Strategies Guide](../guides/testing_strategies.md)
+* [Phoenix Integration Guide](../guides/phoenix_integration.md)

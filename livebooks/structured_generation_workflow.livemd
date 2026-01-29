@@ -1,0 +1,775 @@
+# Structured Generation Workflow
+
+## Introduction
+
+This notebook demonstrates a systematic workflow for structured data generation using validation, iteration, and refinement. We'll generate synthetic but realistic data using pattern constraints.
+
+**Example Use Case**: Generating realistic phone numbers for Washington State that match actual formatting patterns.
+
+**Learning Objectives:**
+
+* Design iterative generation workflows
+* Use pattern validation to ensure quality
+* Refine schemas based on output inspection
+* Debug generation issues systematically
+* Create realistic synthetic data
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines and regex
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## The Workflow Pattern
+
+```elixir
+IO.puts("""
+=== Structured Generation Workflow ===
+
+1. REAL EXAMPLE
+   Start with actual valid data
+   ↓
+2. DRAFT STRUCTURE
+   Create pattern/schema modeling the format
+   ↓
+3. VALIDATE
+   Test pattern against real examples
+   ↓
+4. GENERATE
+   Use validated pattern with LLM
+   ↓
+5. INSPECT
+   Check output quality
+   ↓
+6. REFINE (if needed)
+   Improve pattern based on issues
+   ↓
+7. ITERATE
+   Repeat steps 4-6 until satisfied
+""")
+```
+
+## Step 1: Real Examples
+
+Start with actual valid data to understand the pattern.
+
+```elixir
+# Real Washington State phone numbers
+real_examples = [
+  "(206) 386-4636",
+  # Seattle Public Library
+  "(360) 902-4151",
+  # Washington State Capitol
+  "(509) 335-3564",
+  # Washington State University
+  "(253) 591-5000",
+  # Tacoma City Hall
+  "(425) 452-2750"
+  # Bellevue City Hall
+]
+
+IO.puts("=== Real Washington State Phone Numbers ===")
+
+Enum.each(real_examples, fn number ->
+  IO.puts("  #{number}")
+end)
+
+# Analyze the pattern
+IO.puts("""
+
+Pattern observations:
+- Format: (XXX) XXX-XXXX
+- Area codes: 206, 360, 509, 253, 425
+- First digit of area code: 2-5
+- No special patterns in exchange or subscriber numbers
+""")
+
+:ok
+```
+
+## Step 2: Draft Structure
+
+Create initial pattern based on observations.
+
+```elixir
+defmodule PhonePatterns do
+  @doc """
+  Create progressively refined phone number patterns.
+  """
+
+  # Version 1: Basic format
+  def pattern_v1 do
+    ~r/\([0-9]{3}\) [0-9]{3}-[0-9]{4}/
+  end
+
+  # Version 2: Constrain first digits
+  def pattern_v2 do
+    ~r/\([2-5][0-9]{2}\) [2-9]{3}-[0-9]{4}/
+  end
+
+  # Version 3: More realistic constraints
+  def pattern_v3 do
+    ~r/\([2-5][0-9]{2}\) [2-4][7-9][4-6]-[3-6][2-8][1-4][6-9]/
+  end
+
+  @doc """
+  Test pattern against examples.
+  """
+  def test_pattern(pattern, examples) do
+    results =
+      Enum.map(examples, fn example ->
+        match = Regex.match?(pattern, example)
+        {example, match}
+      end)
+
+    passed = Enum.count(results, fn {_, match} -> match end)
+    IO.puts("\nPattern: #{inspect(pattern)}")
+    IO.puts("Passed: #{passed}/#{length(examples)}")
+
+    Enum.each(results, fn {example, match} ->
+      status = if match, do: "[PASS]", else: "[FAIL]"
+      IO.puts("  #{status} #{example}")
+    end)
+
+    passed == length(examples)
+  end
+end
+
+# Test version 1
+IO.puts("\n=== Testing Pattern V1 (Basic Format) ===")
+PhonePatterns.test_pattern(PhonePatterns.pattern_v1(), real_examples)
+
+# Test version 2
+IO.puts("\n=== Testing Pattern V2 (Constrained Area Codes) ===")
+PhonePatterns.test_pattern(PhonePatterns.pattern_v2(), real_examples)
+
+:ok
+```
+
+## Step 3: Validate Pattern
+
+Ensure pattern works correctly before generation.
+
+```elixir
+defmodule PatternValidator do
+  @doc """
+  Validate pattern against multiple test cases.
+  """
+  def validate(pattern, positive_examples, negative_examples \\ []) do
+    # Test positive examples (should match)
+    positive_results =
+      Enum.map(positive_examples, fn example ->
+        match = Regex.match?(pattern, example)
+        if !match, do: IO.puts("  [ERROR] Should match but doesn't: #{example}")
+        match
+      end)
+
+    # Test negative examples (should NOT match)
+    negative_results =
+      Enum.map(negative_examples, fn example ->
+        match = Regex.match?(pattern, example)
+        if match, do: IO.puts("  [ERROR] Should not match but does: #{example}")
+        !match
+      end)
+
+    all_passed =
+      Enum.all?(positive_results) and
+        (negative_examples == [] or Enum.all?(negative_results))
+
+    %{
+      passed: all_passed,
+      positive_pass_rate: Enum.count(positive_results, & &1) / length(positive_examples),
+      negative_pass_rate:
+        if(negative_examples == [],
+          do: 1.0,
+          else: Enum.count(negative_results, & &1) / length(negative_examples)
+        )
+    }
+  end
+end
+
+# Invalid phone numbers (should not match)
+invalid_examples = [
+  "(123) 456-7890",
+  # Area code starts with 1
+  "206-386-4636",
+  # Missing parentheses
+  "(206)386-4636",
+  # Missing space
+  "(206) 386 4636",
+  # Wrong separator
+  "1-206-386-4636"
+  # Has leading 1
+]
+
+IO.puts("\n=== Validating Pattern ===")
+result = PatternValidator.validate(PhonePatterns.pattern_v2(), real_examples, invalid_examples)
+
+IO.puts("\nValidation results:")
+IO.puts("  Positive examples: #{Float.round(result.positive_pass_rate * 100, 1)}%")
+IO.puts("  Negative examples: #{Float.round(result.negative_pass_rate * 100, 1)}%")
+IO.puts("  Overall: #{if result.passed, do: "PASSED", else: "FAILED"}")
+```
+
+## Step 4: Create Generation Schema
+
+Use validated pattern in schema for generation.
+
+```elixir
+# Schema for phone number generation
+phone_generation_schema =
+  Schema.new(%{
+    phone_number: %{
+      type: :string,
+      required: true,
+      pattern: PhonePatterns.pattern_v2(),
+      description: "Washington State phone number in format (XXX) XXX-XXXX"
+    },
+    location: %{
+      type:
+        {:enum,
+         [
+           "Seattle",
+           "Tacoma",
+           "Spokane",
+           "Vancouver",
+           "Bellevue",
+           "Everett",
+           "Olympia"
+         ]},
+      required: true,
+      description: "City in Washington State"
+    },
+    type: %{
+      type: {:enum, ["business", "government", "residential"]},
+      required: true,
+      description: "Type of phone number"
+    }
+  })
+
+IO.puts("\nGeneration schema created with pattern validation")
+:ok
+```
+
+## Step 5: Generate and Inspect
+
+Generate data and inspect quality.
+
+```elixir
+defmodule DataGenerator do
+  @doc """
+  Generate synthetic phone numbers.
+  """
+  def generate(schema, count, api_key, model) do
+    # In production:
+    # tasks = for _i <- 1..count do
+    #   {schema, [
+    #     backend: HTTP,
+    #     backend_opts: [
+    #       api_key: api_key,
+    #       model: model,
+    #       messages: [
+    #         %{role: "system", content: "Generate realistic Washington State phone numbers."},
+    #         %{role: "user", content: "Generate a phone number entry."}
+    #       ]
+    #     ]
+    #   ]}
+    # end
+    #
+    # ExOutlines.generate_batch(tasks, max_concurrency: 5)
+
+    # Simulated generation
+    simulated_data = [
+      %{
+        "phone_number" => "(206) 425-8765",
+        "location" => "Seattle",
+        "type" => "business"
+      },
+      %{
+        "phone_number" => "(360) 234-9456",
+        "location" => "Olympia",
+        "type" => "government"
+      },
+      %{
+        "phone_number" => "(509) 387-6543",
+        "location" => "Spokane",
+        "type" => "residential"
+      },
+      %{
+        "phone_number" => "(253) 298-7654",
+        "location" => "Tacoma",
+        "type" => "business"
+      },
+      %{
+        "phone_number" => "(425) 376-8901",
+        "location" => "Bellevue",
+        "type" => "business"
+      }
+    ]
+
+    {:ok, Enum.take(simulated_data, count)}
+  end
+
+  @doc """
+  Inspect generated data quality.
+  """
+  def inspect_quality(data, pattern) do
+    IO.puts("\n=== Quality Inspection ===")
+    IO.puts("Generated #{length(data)} entries\n")
+
+    valid_count = 0
+    issues = []
+
+    Enum.each(data, fn entry ->
+      phone = entry["phone_number"]
+      valid = Regex.match?(pattern, phone)
+
+      status = if valid, do: "[VALID]", else: "[INVALID]"
+      IO.puts("#{status} #{phone} - #{entry["location"]} (#{entry["type"]})")
+
+      if !valid do
+        issues = issues ++ ["Invalid format: #{phone}"]
+      end
+    end)
+
+    valid_count = Enum.count(data, fn entry -> Regex.match?(pattern, entry["phone_number"]) end)
+
+    %{
+      total: length(data),
+      valid: valid_count,
+      quality_score: valid_count / length(data),
+      issues: issues
+    }
+  end
+end
+
+# Generate sample data
+{:ok, generated_data} = DataGenerator.generate(phone_generation_schema, 5, api_key, model)
+
+# Inspect quality
+quality = DataGenerator.inspect_quality(generated_data, PhonePatterns.pattern_v2())
+
+IO.puts("\n=== Quality Metrics ===")
+IO.puts("Valid entries: #{quality.valid}/#{quality.total}")
+IO.puts("Quality score: #{Float.round(quality.quality_score * 100, 1)}%")
+
+if length(quality.issues) > 0 do
+  IO.puts("\nIssues found:")
+
+  Enum.each(quality.issues, fn issue ->
+    IO.puts("  - #{issue}")
+  end)
+end
+```
+
+## Step 6: Refine Based on Issues
+
+If quality issues are found, refine the pattern or prompt.
+
+```elixir
+defmodule RefinementWorkflow do
+  @doc """
+  Analyze issues and suggest refinements.
+  """
+  def analyze_issues(data, pattern) do
+    issues = []
+
+    # Check for common problems
+    Enum.each(data, fn entry ->
+      phone = entry["phone_number"]
+
+      cond do
+        !String.starts_with?(phone, "(") ->
+          issues = issues ++ ["Missing opening parenthesis"]
+
+        !String.contains?(phone, ") ") ->
+          issues = issues ++ ["Missing space after area code"]
+
+        !String.contains?(phone, "-") ->
+          issues = issues ++ ["Missing hyphen in phone number"]
+
+        String.length(phone) != 14 ->
+          issues = issues ++ ["Incorrect length (expected 14 characters)"]
+
+        !Regex.match?(pattern, phone) ->
+          issues = issues ++ ["Does not match pattern"]
+
+        true ->
+          :ok
+      end
+    end)
+
+    issue_frequencies = Enum.frequencies(issues)
+
+    if map_size(issue_frequencies) > 0 do
+      IO.puts("\n=== Issue Analysis ===")
+
+      Enum.each(issue_frequencies, fn {issue, count} ->
+        IO.puts("  #{count}x: #{issue}")
+      end)
+
+      suggestions = generate_suggestions(issue_frequencies)
+      IO.puts("\n=== Refinement Suggestions ===")
+
+      Enum.each(suggestions, fn suggestion ->
+        IO.puts("  - #{suggestion}")
+      end)
+    else
+      IO.puts("\n=== No Issues Found ===")
+      IO.puts("Data quality is excellent!")
+    end
+  end
+
+  defp generate_suggestions(issue_frequencies) do
+    Enum.flat_map(issue_frequencies, fn {issue, _count} ->
+      case issue do
+        "Missing opening parenthesis" ->
+          ["Strengthen prompt: Emphasize (XXX) format with parentheses"]
+
+        "Missing space after area code" ->
+          ["Add space requirement to prompt: (XXX) XXX-XXXX"]
+
+        "Missing hyphen in phone number" ->
+          ["Clarify hyphen placement in examples"]
+
+        "Does not match pattern" ->
+          ["Review and update regex pattern", "Add more specific constraints"]
+
+        _ ->
+          []
+      end
+    end)
+  end
+end
+
+# Analyze any issues
+RefinementWorkflow.analyze_issues(generated_data, PhonePatterns.pattern_v2())
+```
+
+## Step 7: Iterate Until Satisfied
+
+Keep refining until quality meets requirements.
+
+```elixir
+defmodule IterativeGeneration do
+  @doc """
+  Generate and refine until quality threshold is met.
+  """
+  def generate_until_quality(schema, pattern, target_quality, max_iterations \\ 5) do
+    iterate(schema, pattern, target_quality, 1, max_iterations, [])
+  end
+
+  defp iterate(schema, pattern, target_quality, iteration, max_iterations, history) do
+    IO.puts("\n" <> String.duplicate("=", 70))
+    IO.puts("Iteration #{iteration}")
+    IO.puts(String.duplicate("=", 70))
+
+    # Generate batch
+    {:ok, data} = DataGenerator.generate(schema, 10, nil, nil)
+
+    # Check quality
+    quality = DataGenerator.inspect_quality(data, pattern)
+
+    # Record history
+    history =
+      history ++
+        [%{iteration: iteration, quality_score: quality.quality_score, issues: quality.issues}]
+
+    cond do
+      quality.quality_score >= target_quality ->
+        IO.puts("\n[SUCCESS] Quality threshold met: #{Float.round(quality.quality_score * 100, 1)}%")
+        {:ok, data, history}
+
+      iteration >= max_iterations ->
+        IO.puts("\n[WARNING] Max iterations reached without meeting quality threshold")
+        {:error, :max_iterations, history}
+
+      true ->
+        IO.puts("\nQuality: #{Float.round(quality.quality_score * 100, 1)}% (target: #{Float.round(target_quality * 100, 1)}%)")
+        IO.puts("Refining and retrying...")
+
+        # In production, adjust schema/pattern based on issues
+        iterate(schema, pattern, target_quality, iteration + 1, max_iterations, history)
+    end
+  end
+end
+
+# Run iterative generation
+# IterativeGeneration.generate_until_quality(
+#   phone_generation_schema,
+#   PhonePatterns.pattern_v2(),
+#   0.95,  # 95% quality target
+#   3      # max 3 iterations
+# )
+
+IO.puts("\nIterative generation pattern demonstrated")
+IO.puts("In production, this would refine until quality threshold is met")
+```
+
+## Workflow Visualization
+
+```elixir
+defmodule WorkflowVisualizer do
+  def visualize_history(history) do
+    IO.puts("\n=== Generation Quality Over Iterations ===\n")
+
+    Enum.each(history, fn iteration ->
+      score_pct = Float.round(iteration.quality_score * 100, 1)
+      bar_length = round(score_pct / 2)
+      bar = String.duplicate("█", bar_length)
+
+      IO.puts("Iteration #{iteration.iteration}: #{bar} #{score_pct}%")
+
+      if length(iteration.issues) > 0 do
+        IO.puts("  Issues: #{length(iteration.issues)}")
+      end
+    end)
+  end
+end
+
+# Example history
+example_history = [
+  %{iteration: 1, quality_score: 0.60, issues: ["format", "format"]},
+  %{iteration: 2, quality_score: 0.85, issues: ["format"]},
+  %{iteration: 3, quality_score: 0.95, issues: []}
+]
+
+WorkflowVisualizer.visualize_history(example_history)
+```
+
+## Advanced: Multi-Field Validation
+
+Extend validation to multiple fields and relationships.
+
+```elixir
+defmodule AdvancedValidation do
+  @doc """
+  Validate complex relationships between fields.
+  """
+  def validate_entry(entry) do
+    errors = []
+
+    # Check phone number format
+    if !Regex.match?(~r/\([2-5][0-9]{2}\) [2-9]{3}-[0-9]{4}/, entry["phone_number"]) do
+      errors = errors ++ ["Invalid phone format"]
+    end
+
+    # Check area code matches location
+    area_code = extract_area_code(entry["phone_number"])
+    expected_codes = location_area_codes(entry["location"])
+
+    if area_code && !Enum.member?(expected_codes, area_code) do
+      errors = errors ++ ["Area code #{area_code} doesn't match #{entry["location"]}"]
+    end
+
+    # Check type constraints
+    if entry["type"] == "government" && entry["location"] != "Olympia" do
+      errors = errors ++ ["Government numbers typically in Olympia (state capital)"]
+    end
+
+    if length(errors) == 0 do
+      {:ok, entry}
+    else
+      {:error, errors}
+    end
+  end
+
+  defp extract_area_code(phone) do
+    case Regex.run(~r/\((\d{3})\)/, phone) do
+      [_, code] -> code
+      _ -> nil
+    end
+  end
+
+  defp location_area_codes(location) do
+    %{
+      "Seattle" => ["206"],
+      "Tacoma" => ["253"],
+      "Spokane" => ["509"],
+      "Vancouver" => ["360"],
+      "Bellevue" => ["425"],
+      "Everett" => ["425"],
+      "Olympia" => ["360"]
+    }[location] || []
+  end
+end
+
+# Validate generated entries
+IO.puts("\n=== Advanced Validation ===")
+
+Enum.each(generated_data, fn entry ->
+  case AdvancedValidation.validate_entry(entry) do
+    {:ok, _} ->
+      IO.puts("[VALID] #{entry["phone_number"]} - #{entry["location"]}")
+
+    {:error, errors} ->
+      IO.puts("[INVALID] #{entry["phone_number"]}")
+
+      Enum.each(errors, fn error ->
+        IO.puts("  - #{error}")
+      end)
+  end
+end)
+```
+
+## Production Workflow Template
+
+```elixir
+defmodule ProductionWorkflow do
+  @doc """
+  Complete production workflow for structured generation.
+  """
+  def run(opts \\ []) do
+    # Configuration
+    target_quality = Keyword.get(opts, :target_quality, 0.95)
+    batch_size = Keyword.get(opts, :batch_size, 100)
+    max_iterations = Keyword.get(opts, :max_iterations, 5)
+
+    IO.puts("""
+    Production Workflow Steps:
+
+    1. Define Requirements
+       - Identify real examples
+       - Document pattern rules
+       - Set quality thresholds
+
+    2. Create Initial Schema
+       - Define field types
+       - Add pattern constraints
+       - Include descriptions
+
+    3. Validate Schema
+       - Test against positive examples
+       - Test against negative examples
+       - Verify edge cases
+
+    4. Generate Sample Batch
+       - Small batch first (10-20 items)
+       - Inspect output quality
+       - Identify issues
+
+    5. Refine and Iterate
+       - Adjust patterns based on issues
+       - Improve prompts
+       - Tighten constraints
+
+    6. Scale Up
+       - Generate full batch
+       - Monitor quality metrics
+       - Log all generations
+
+    7. Post-Processing
+       - Final validation pass
+       - Deduplication
+       - Export to target format
+
+    Target Quality: #{target_quality * 100}%
+    Batch Size: #{batch_size}
+    Max Iterations: #{max_iterations}
+    """)
+  end
+end
+
+ProductionWorkflow.run(target_quality: 0.95, batch_size: 1000, max_iterations: 3)
+```
+
+## Key Takeaways
+
+**Workflow Pattern:**
+
+1. Start with real examples
+2. Draft initial structure
+3. Validate before generation
+4. Generate and inspect
+5. Refine based on issues
+6. Iterate until quality met
+
+**Best Practices:**
+
+* Always test patterns against real data first
+* Start with small batches
+* Inspect every iteration
+* Track quality metrics over time
+* Document refinement decisions
+
+**Common Issues:**
+
+* Pattern too loose (accepts invalid data)
+* Pattern too strict (rejects valid data)
+* Prompt ambiguity (inconsistent generation)
+* Edge cases not covered
+* Performance issues with complex patterns
+
+**Production Tips:**
+
+* Set quality thresholds upfront
+* Limit maximum iterations
+* Log all generations for debugging
+* Cache validated patterns
+* Monitor generation costs
+* Use batch processing for scale
+
+## Real-World Applications
+
+**Synthetic Data Generation:**
+- Test data for QA
+- Training data augmentation
+- Privacy-safe datasets
+- Load testing scenarios
+
+**Data Normalization:**
+- Standardize formats
+- Clean existing data
+- Fill missing fields
+- Correct inconsistencies
+
+**Content Creation:**
+- Product descriptions
+- User profiles
+- Reviews and ratings
+- Social media posts
+
+## Challenges
+
+Try these exercises:
+
+1. Generate email addresses with company domain patterns
+2. Create realistic street addresses for a city
+3. Generate product SKUs with embedded category codes
+4. Create usernames following specific naming conventions
+5. Generate realistic timestamps with business hours constraints
+
+## Next Steps
+
+* Try the **Chain of Thought** notebook for reasoning workflows
+* Explore the **Receipt Digitization** notebook for real-world extraction
+* Read the **Schema Patterns** guide for validation techniques
+* Check the **Testing Strategies** guide for quality assurance
+
+## Further Reading
+
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)
+* [Testing Strategies Guide](../guides/testing_strategies.md)
+* Regular expressions in Elixir

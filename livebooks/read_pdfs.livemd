@@ -1,0 +1,1212 @@
+# Reading PDFs with Vision-Language Models
+
+```elixir
+Mix.install([
+  {:ex_outlines, path: Path.join(__DIR__, "..")},
+  {:req, "~> 0.5.0"},
+  {:jason, "~> 1.4"},
+  {:pdf_to_image, "~> 0.1.0", override: true}
+])
+```
+
+## Introduction
+
+This notebook demonstrates how to extract structured data from PDF documents using vision-language models (VLMs). Unlike traditional OCR followed by text parsing, VLMs can understand document layout, tables, and visual elements directly from images.
+
+Key capabilities:
+- Convert PDF pages to images
+- Process images with vision-language models
+- Extract structured data with validation
+- Handle multi-page documents
+- Deal with complex layouts (tables, forms, diagrams)
+
+Real-world applications:
+- Invoice and receipt processing
+- Form digitization
+- Research paper extraction
+- Legal document analysis
+- Medical record parsing
+
+## Vision-Language Model Support
+
+ExOutlines can work with any VLM that supports image input. Common options:
+
+- **Anthropic Claude 3.5 Sonnet** - Excellent document understanding, native API support
+- **Pixtral** - Open-source VLM by Mistral AI
+- **Qwen2-VL** - Open-source multimodal model by Alibaba
+- **GPT-4 Vision** - OpenAI's multimodal model
+
+For this notebook, we'll demonstrate patterns that work across different VLMs.
+
+## PDF to Image Conversion
+
+First, we need to convert PDF pages to images. In Elixir, we can use system tools or native libraries.
+
+```elixir
+defmodule PDFConverter do
+  @moduledoc """
+  Convert PDF documents to images for VLM processing.
+  """
+
+  @doc """
+  Convert a PDF file to a list of PNG images (one per page).
+
+  Returns {:ok, [image_path1, image_path2, ...]} or {:error, reason}.
+  """
+  def pdf_to_images(pdf_path, opts \\ []) do
+    output_dir = Keyword.get(opts, :output_dir, System.tmp_dir!())
+    dpi = Keyword.get(opts, :dpi, 150)
+    format = Keyword.get(opts, :format, "png")
+
+    # Ensure output directory exists
+    File.mkdir_p!(output_dir)
+
+    # Use ImageMagick convert command
+    # Alternative: use pdf2image library or Ghostscript
+    output_pattern = Path.join(output_dir, "page-%03d.#{format}")
+
+    case System.cmd("convert", [
+      "-density", "#{dpi}",
+      pdf_path,
+      "-quality", "90",
+      output_pattern
+    ]) do
+      {_, 0} ->
+        # List generated images
+        images = output_dir
+        |> File.ls!()
+        |> Enum.filter(&String.starts_with?(&1, "page-"))
+        |> Enum.sort()
+        |> Enum.map(&Path.join(output_dir, &1))
+
+        {:ok, images}
+
+      {error, code} ->
+        {:error, "convert failed with code #{code}: #{error}"}
+    end
+  end
+
+  @doc """
+  Convert a single PDF page to base64 encoded image data.
+
+  Useful for direct API calls to vision models.
+  """
+  def pdf_page_to_base64(pdf_path, page_num, opts \\ []) do
+    with {:ok, images} <- pdf_to_images(pdf_path, opts),
+         page_path <- Enum.at(images, page_num - 1),
+         {:ok, data} <- File.read(page_path) do
+      base64 = Base.encode64(data)
+      {:ok, base64}
+    end
+  end
+end
+```
+
+## Example 1: Invoice Extraction
+
+Let's extract structured data from an invoice PDF.
+
+```elixir
+defmodule InvoiceExtractor do
+  @moduledoc """
+  Extract structured invoice data from PDF documents.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  @doc """
+  Schema for invoice data extraction.
+  """
+  def invoice_schema do
+    # Line item schema for products/services
+    line_item_schema = Schema.new(%{
+      description: %{
+        type: :string,
+        required: true,
+        description: "Product or service description"
+      },
+      quantity: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Quantity of items"
+      },
+      unit_price: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Price per unit"
+      },
+      total: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Line item total (quantity * unit_price)"
+      }
+    })
+
+    # Address schema
+    address_schema = Schema.new(%{
+      street: %{type: :string, required: true},
+      city: %{type: :string, required: true},
+      state: %{type: :string, required: false},
+      postal_code: %{type: :string, required: false},
+      country: %{type: :string, required: true}
+    })
+
+    # Main invoice schema
+    Schema.new(%{
+      invoice_number: %{
+        type: :string,
+        required: true,
+        description: "Unique invoice identifier"
+      },
+      invoice_date: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/,
+        description: "Invoice date in YYYY-MM-DD format"
+      },
+      due_date: %{
+        type: :string,
+        required: false,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/,
+        description: "Payment due date in YYYY-MM-DD format"
+      },
+      vendor: %{
+        type: {:object, Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: false},
+          email: %{type: :string, format: :email, required: false},
+          phone: %{type: :string, required: false}
+        })},
+        required: true,
+        description: "Vendor information"
+      },
+      customer: %{
+        type: {:object, Schema.new(%{
+          name: %{type: :string, required: true},
+          address: %{type: {:object, address_schema}, required: false},
+          email: %{type: :string, format: :email, required: false}
+        })},
+        required: true,
+        description: "Customer information"
+      },
+      line_items: %{
+        type: {:array, %{type: {:object, line_item_schema}}},
+        required: true,
+        min_items: 1,
+        description: "List of invoice line items"
+      },
+      subtotal: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Subtotal before tax"
+      },
+      tax: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Tax amount"
+      },
+      total: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Total amount due"
+      },
+      currency: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^[A-Z]{3}$/,
+        description: "Currency code (ISO 4217)"
+      },
+      payment_terms: %{
+        type: :string,
+        required: false,
+        description: "Payment terms (e.g., 'Net 30')"
+      }
+    })
+  end
+
+  @doc """
+  Extract invoice data from a PDF file.
+
+  This is a conceptual implementation showing how to structure
+  the extraction process. In production, you would:
+
+  1. Convert PDF to images
+  2. Send images to a VLM with the invoice schema
+  3. Validate and return structured data
+  """
+  def extract_from_pdf(pdf_path, opts \\ []) do
+    # Convert PDF to images
+    with {:ok, images} <- PDFConverter.pdf_to_images(pdf_path, opts) do
+      # For multi-page invoices, you might process all pages
+      # For this example, we'll process just the first page
+      first_page = List.first(images)
+
+      extract_from_image(first_page, opts)
+    end
+  end
+
+  @doc """
+  Extract invoice data from an image file.
+  """
+  def extract_from_image(image_path, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    # Read image and encode to base64
+    {:ok, image_data} = File.read(image_path)
+    base64_image = Base.encode64(image_data)
+
+    # Build prompt for vision model
+    messages = [
+      %{
+        role: "user",
+        content: [
+          %{
+            type: "image",
+            source: %{
+              type: "base64",
+              media_type: "image/png",
+              data: base64_image
+            }
+          },
+          %{
+            type: "text",
+            text: """
+            Extract all invoice information from this image. Pay careful attention to:
+            - Invoice number and dates
+            - Vendor and customer details
+            - All line items with quantities, prices, and totals
+            - Subtotal, tax, and total amounts
+            - Currency and payment terms
+
+            Ensure all monetary amounts are accurate and all dates are in YYYY-MM-DD format.
+            """
+          }
+        ]
+      }
+    ]
+
+    # Generate with schema validation
+    # Note: This requires VLM support in the backend
+    schema = invoice_schema()
+
+    case Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages
+    ) do
+      {:ok, invoice_data} ->
+        # Additional validation: check that line items sum to subtotal
+        validate_totals(invoice_data)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp validate_totals(invoice_data) do
+    # Calculate expected subtotal from line items
+    calculated_subtotal =
+      invoice_data.line_items
+      |> Enum.map(& &1.total)
+      |> Enum.sum()
+      |> Float.round(2)
+
+    # Check if it matches the stated subtotal
+    if abs(calculated_subtotal - invoice_data.subtotal) < 0.01 do
+      {:ok, invoice_data}
+    else
+      {:error,
+       {:validation_error,
+        "Subtotal mismatch: line items sum to #{calculated_subtotal} " <>
+        "but invoice shows #{invoice_data.subtotal}"}}
+    end
+  end
+end
+```
+
+## Example Invoice Data
+
+Here's what the extracted data looks like:
+
+```elixir
+# Example output from invoice extraction
+example_invoice = %{
+  invoice_number: "INV-2024-001234",
+  invoice_date: "2024-01-15",
+  due_date: "2024-02-14",
+  vendor: %{
+    name: "Acme Software Inc.",
+    address: %{
+      street: "123 Tech Boulevard",
+      city: "San Francisco",
+      state: "CA",
+      postal_code: "94102",
+      country: "USA"
+    },
+    email: "billing@acmesoftware.com",
+    phone: "+1-555-0123"
+  },
+  customer: %{
+    name: "Global Enterprises LLC",
+    address: %{
+      street: "456 Business Ave",
+      city: "New York",
+      state: "NY",
+      postal_code: "10001",
+      country: "USA"
+    },
+    email: "accounts@globalent.com"
+  },
+  line_items: [
+    %{
+      description: "Software License - Enterprise Plan",
+      quantity: 50,
+      unit_price: 99.99,
+      total: 4999.50
+    },
+    %{
+      description: "Implementation Services",
+      quantity: 40,
+      unit_price: 150.00,
+      total: 6000.00
+    },
+    %{
+      description: "Annual Support Contract",
+      quantity: 1,
+      unit_price: 5000.00,
+      total: 5000.00
+    }
+  ],
+  subtotal: 15999.50,
+  tax: 1439.96,
+  total: 17439.46,
+  currency: "USD",
+  payment_terms: "Net 30"
+}
+
+IO.inspect(example_invoice, label: "Extracted Invoice Data")
+```
+
+## Example 2: Research Paper Extraction
+
+Extract metadata and key information from academic papers.
+
+```elixir
+defmodule ResearchPaperExtractor do
+  @moduledoc """
+  Extract structured information from research papers.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  def paper_schema do
+    # Author schema
+    author_schema = Schema.new(%{
+      name: %{type: :string, required: true},
+      affiliation: %{type: :string, required: false},
+      email: %{type: :string, format: :email, required: false}
+    })
+
+    # Citation schema
+    citation_schema = Schema.new(%{
+      title: %{type: :string, required: true},
+      authors: %{type: :string, required: true},
+      year: %{type: :integer, required: true, min: 1900, max: 2100},
+      venue: %{type: :string, required: false}
+    })
+
+    Schema.new(%{
+      title: %{
+        type: :string,
+        required: true,
+        min_length: 5,
+        max_length: 300,
+        description: "Paper title"
+      },
+      authors: %{
+        type: {:array, %{type: {:object, author_schema}}},
+        required: true,
+        min_items: 1,
+        description: "List of authors"
+      },
+      abstract: %{
+        type: :string,
+        required: true,
+        min_length: 50,
+        max_length: 2000,
+        description: "Paper abstract"
+      },
+      keywords: %{
+        type: {:array, %{type: :string, min_length: 2, max_length: 50}},
+        required: true,
+        min_items: 3,
+        max_items: 10,
+        unique_items: true,
+        description: "Paper keywords"
+      },
+      publication_date: %{
+        type: :string,
+        required: false,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/,
+        description: "Publication date"
+      },
+      doi: %{
+        type: :string,
+        required: false,
+        pattern: ~r/^10\.\d{4,}\/[^\s]+$/,
+        description: "Digital Object Identifier"
+      },
+      sections: %{
+        type: {:array, %{type: :string}},
+        required: false,
+        description: "Main section headings"
+      },
+      key_findings: %{
+        type: {:array, %{type: :string, max_length: 200}},
+        required: false,
+        min_items: 1,
+        max_items: 5,
+        description: "Key findings or contributions"
+      },
+      methodology: %{
+        type: :string,
+        required: false,
+        max_length: 500,
+        description: "Brief description of methodology"
+      },
+      references_count: %{
+        type: :integer,
+        required: false,
+        min: 0,
+        description: "Number of references cited"
+      }
+    })
+  end
+
+  def extract_from_pdf(pdf_path, opts \\ []) do
+    # For research papers, we might want to process multiple pages
+    # to capture abstract, methodology, and conclusions
+    with {:ok, images} <- PDFConverter.pdf_to_images(pdf_path, opts) do
+      # Process first 3 pages (typically contains abstract and intro)
+      pages_to_process = Enum.take(images, 3)
+
+      extract_from_pages(pages_to_process, opts)
+    end
+  end
+
+  defp extract_from_pages(image_paths, opts) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    # Read and encode all images
+    images_data = Enum.map(image_paths, fn path ->
+      {:ok, data} = File.read(path)
+      Base.encode64(data)
+    end)
+
+    # Build content with multiple images
+    image_content = Enum.map(images_data, fn base64_data ->
+      %{
+        type: "image",
+        source: %{
+          type: "base64",
+          media_type: "image/png",
+          data: base64_data
+        }
+      }
+    end)
+
+    messages = [
+      %{
+        role: "user",
+        content: image_content ++ [
+          %{
+            type: "text",
+            text: """
+            Extract comprehensive information from this research paper. Include:
+            - Complete title
+            - All authors with their affiliations
+            - Full abstract
+            - Keywords or key terms
+            - Publication date and DOI if visible
+            - Main section headings
+            - Key findings or contributions (3-5 main points)
+            - Brief methodology description
+
+            Be thorough and accurate. Extract text exactly as it appears.
+            """
+          }
+        ]
+      }
+    ]
+
+    schema = paper_schema()
+
+    Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages
+    )
+  end
+end
+```
+
+## Example Research Paper Data
+
+```elixir
+example_paper = %{
+  title: "Structured Output Generation for Large Language Models: A Comprehensive Survey",
+  authors: [
+    %{
+      name: "Alice Johnson",
+      affiliation: "Stanford University",
+      email: "alice@stanford.edu"
+    },
+    %{
+      name: "Bob Chen",
+      affiliation: "MIT CSAIL",
+      email: "bobchen@mit.edu"
+    },
+    %{
+      name: "Carol Williams",
+      affiliation: "Google Research"
+    }
+  ],
+  abstract: """
+  Large language models have shown remarkable capabilities in generating natural
+  language text, but ensuring their outputs conform to specific formats and
+  constraints remains challenging. This survey examines techniques for structured
+  output generation, including constrained decoding, post-generation validation,
+  and hybrid approaches. We evaluate these methods across multiple dimensions
+  including accuracy, computational efficiency, and ease of implementation. Our
+  findings suggest that validation-based approaches offer the best balance of
+  flexibility and reliability for production systems.
+  """,
+  keywords: [
+    "large language models",
+    "structured generation",
+    "constrained decoding",
+    "output validation",
+    "JSON schema"
+  ],
+  publication_date: "2024-03-15",
+  doi: "10.1234/example.2024.001",
+  sections: [
+    "Introduction",
+    "Background",
+    "Constrained Decoding Methods",
+    "Validation-Based Approaches",
+    "Experimental Evaluation",
+    "Discussion",
+    "Conclusion"
+  ],
+  key_findings: [
+    "Validation-based approaches achieve 99.8% schema conformance with minimal overhead",
+    "Constrained decoding reduces flexibility for complex nested structures",
+    "Hybrid approaches combining both techniques show promising results",
+    "LLM performance varies significantly across different schema complexities"
+  ],
+  methodology: """
+  We evaluated seven different structured output techniques across five major
+  language models using a benchmark of 1000 diverse schemas. Each method was
+  tested on schema conformance, generation quality, latency, and resource usage.
+  """,
+  references_count: 87
+}
+
+IO.inspect(example_paper, label: "Extracted Research Paper")
+```
+
+## Example 3: Multi-Page Form Processing
+
+Handle complex forms spanning multiple pages.
+
+```elixir
+defmodule FormProcessor do
+  @moduledoc """
+  Process multi-page forms with vision-language models.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  def medical_form_schema do
+    Schema.new(%{
+      patient_info: %{
+        type: {:object, Schema.new(%{
+          full_name: %{type: :string, required: true},
+          date_of_birth: %{
+            type: :string,
+            required: true,
+            pattern: ~r/^\d{4}-\d{2}-\d{2}$/
+          },
+          gender: %{
+            type: {:enum, ["male", "female", "other", "prefer not to say"]},
+            required: true
+          },
+          address: %{type: :string, required: true},
+          phone: %{type: :string, required: true},
+          email: %{type: :string, format: :email, required: false},
+          emergency_contact: %{
+            type: {:object, Schema.new(%{
+              name: %{type: :string, required: true},
+              relationship: %{type: :string, required: true},
+              phone: %{type: :string, required: true}
+            })},
+            required: true
+          }
+        })},
+        required: true
+      },
+      medical_history: %{
+        type: {:object, Schema.new(%{
+          current_medications: %{
+            type: {:array, %{type: :string}},
+            required: false
+          },
+          allergies: %{
+            type: {:array, %{type: :string}},
+            required: false
+          },
+          chronic_conditions: %{
+            type: {:array, %{type: :string}},
+            required: false
+          },
+          previous_surgeries: %{
+            type: {:array, %{
+              type: {:object, Schema.new(%{
+                procedure: %{type: :string, required: true},
+                year: %{type: :integer, required: true, min: 1900, max: 2100}
+              })}
+            }},
+            required: false
+          }
+        })},
+        required: true
+      },
+      insurance: %{
+        type: {:object, Schema.new(%{
+          provider: %{type: :string, required: true},
+          policy_number: %{type: :string, required: true},
+          group_number: %{type: :string, required: false},
+          cardholder_name: %{type: :string, required: true}
+        })},
+        required: false
+      },
+      consent_signatures: %{
+        type: {:object, Schema.new(%{
+          patient_signed: %{type: :boolean, required: true},
+          patient_signature_date: %{
+            type: :string,
+            required: true,
+            pattern: ~r/^\d{4}-\d{2}-\d{2}$/
+          },
+          guardian_signed: %{type: :boolean, required: false},
+          guardian_name: %{type: :string, required: false}
+        })},
+        required: true
+      }
+    })
+  end
+
+  def process_form(pdf_path, opts \\ []) do
+    # Convert entire multi-page form to images
+    with {:ok, images} <- PDFConverter.pdf_to_images(pdf_path, opts) do
+      # Process all pages together for complete context
+      extract_form_data(images, opts)
+    end
+  end
+
+  defp extract_form_data(image_paths, opts) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    # Encode all page images
+    images_data = Enum.map(image_paths, fn path ->
+      {:ok, data} = File.read(path)
+      %{
+        type: "image",
+        source: %{
+          type: "base64",
+          media_type: "image/png",
+          data: Base.encode64(data)
+        }
+      }
+    end)
+
+    messages = [
+      %{
+        role: "user",
+        content: images_data ++ [
+          %{
+            type: "text",
+            text: """
+            Extract all information from this medical intake form. The form spans
+            multiple pages. Please extract:
+
+            1. Patient personal information (name, DOB, contact details, emergency contact)
+            2. Medical history (medications, allergies, conditions, surgeries)
+            3. Insurance information
+            4. Consent signatures and dates
+
+            Pay careful attention to checkboxes and handwritten entries. If a field
+            is blank or unchecked, omit it from the output. Ensure all dates are in
+            YYYY-MM-DD format.
+            """
+          }
+        ]
+      }
+    ]
+
+    schema = medical_form_schema()
+
+    Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages,
+      max_retries: 3
+    )
+  end
+end
+```
+
+## Handling Different Document Types
+
+Strategy for processing various document formats:
+
+```elixir
+defmodule DocumentClassifier do
+  @moduledoc """
+  Classify and route documents to appropriate extractors.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  def classification_schema do
+    Schema.new(%{
+      document_type: %{
+        type: {:enum, [
+          "invoice",
+          "receipt",
+          "contract",
+          "form",
+          "research_paper",
+          "report",
+          "letter",
+          "other"
+        ]},
+        required: true,
+        description: "Type of document"
+      },
+      confidence: %{
+        type: {:enum, ["high", "medium", "low"]},
+        required: true,
+        description: "Confidence in classification"
+      },
+      language: %{
+        type: :string,
+        required: true,
+        description: "Primary language of document"
+      },
+      page_count: %{
+        type: :integer,
+        required: true,
+        min: 1,
+        description: "Estimated number of pages"
+      }
+    })
+  end
+
+  def classify_document(pdf_path, opts \\ []) do
+    # Only process first page for classification
+    with {:ok, images} <- PDFConverter.pdf_to_images(pdf_path, opts),
+         first_page <- List.first(images),
+         {:ok, image_data} <- File.read(first_page) do
+
+      backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+      base64_image = Base.encode64(image_data)
+
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{
+              type: "image",
+              source: %{
+                type: "base64",
+                media_type: "image/png",
+                data: base64_image
+              }
+            },
+            %{
+              type: "text",
+              text: """
+              Analyze this document and classify it. Determine:
+              - What type of document is this?
+              - What language is it in?
+              - How confident are you in the classification?
+              - How many pages does it appear to have?
+              """
+            }
+          ]
+        }
+      ]
+
+      schema = classification_schema()
+
+      Spec.generate(schema,
+        backend: backend,
+        backend_opts: Keyword.get(opts, :backend_opts, []),
+        messages: messages
+      )
+    end
+  end
+
+  def process_document(pdf_path, opts \\ []) do
+    # First classify the document
+    with {:ok, classification} <- classify_document(pdf_path, opts) do
+      # Route to appropriate extractor
+      case classification.document_type do
+        "invoice" ->
+          InvoiceExtractor.extract_from_pdf(pdf_path, opts)
+
+        "research_paper" ->
+          ResearchPaperExtractor.extract_from_pdf(pdf_path, opts)
+
+        "form" ->
+          FormProcessor.process_form(pdf_path, opts)
+
+        other_type ->
+          {:error, {:unsupported_type, other_type}}
+      end
+    end
+  end
+end
+```
+
+## Error Handling and Quality Checks
+
+Strategies for handling common issues:
+
+```elixir
+defmodule DocumentQualityChecker do
+  @moduledoc """
+  Validate extracted data quality and handle common issues.
+  """
+
+  def validate_extraction(extracted_data, expected_fields) do
+    missing_fields = find_missing_fields(extracted_data, expected_fields)
+    suspicious_values = find_suspicious_values(extracted_data)
+
+    cond do
+      length(missing_fields) > 0 ->
+        {:warning, :missing_fields, missing_fields}
+
+      length(suspicious_values) > 0 ->
+        {:warning, :suspicious_values, suspicious_values}
+
+      true ->
+        {:ok, :validated}
+    end
+  end
+
+  defp find_missing_fields(data, required_fields) do
+    Enum.filter(required_fields, fn field ->
+      value = get_in(data, field)
+      is_nil(value) or value == ""
+    end)
+  end
+
+  defp find_suspicious_values(data) when is_map(data) do
+    data
+    |> Enum.flat_map(fn {key, value} ->
+      case check_value(key, value) do
+        {:suspicious, reason} -> [{key, reason}]
+        :ok -> []
+      end
+    end)
+  end
+
+  defp check_value(_key, value) when is_binary(value) do
+    cond do
+      # Check for OCR artifacts
+      String.contains?(value, ["###", "???", "||||"]) ->
+        {:suspicious, "Contains OCR artifacts"}
+
+      # Check for unreasonably long values
+      String.length(value) > 500 ->
+        {:suspicious, "Unusually long value"}
+
+      # Check for mostly punctuation
+      punctuation_count = value
+        |> String.graphemes()
+        |> Enum.count(&String.match?(&1, ~r/[^\w\s]/))
+
+      punctuation_count > String.length(value) * 0.5 ->
+        {:suspicious, "Mostly punctuation"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp check_value(_key, _value), do: :ok
+end
+```
+
+## Production Integration Example
+
+Complete workflow for PDF processing in a Phoenix application:
+
+```elixir
+defmodule DocumentProcessor do
+  @moduledoc """
+  Production-ready document processing workflow.
+  """
+
+  require Logger
+
+  def process_uploaded_pdf(upload, user_id) do
+    Logger.info("Processing PDF upload for user #{user_id}")
+
+    # Step 1: Classify document
+    case DocumentClassifier.classify_document(upload.path) do
+      {:ok, classification} ->
+        Logger.info("Document classified as: #{classification.document_type}")
+
+        # Step 2: Extract data based on type
+        case extract_data(upload.path, classification.document_type) do
+          {:ok, data} ->
+            # Step 3: Validate extraction quality
+            case validate_quality(data, classification.document_type) do
+              {:ok, :validated} ->
+                # Step 4: Store in database
+                save_extracted_data(data, user_id, classification)
+
+              {:warning, reason, details} ->
+                Logger.warning("Extraction quality issue: #{reason}")
+                # Flag for human review
+                {:needs_review, data, details}
+            end
+
+          {:error, reason} ->
+            Logger.error("Extraction failed: #{inspect(reason)}")
+            {:error, :extraction_failed}
+        end
+
+      {:error, reason} ->
+        Logger.error("Classification failed: #{inspect(reason)}")
+        {:error, :classification_failed}
+    end
+  end
+
+  defp extract_data(pdf_path, "invoice") do
+    InvoiceExtractor.extract_from_pdf(pdf_path,
+      backend: ExOutlines.Backend.Anthropic,
+      backend_opts: [
+        api_key: System.get_env("ANTHROPIC_API_KEY"),
+        model: "claude-3-5-sonnet-20241022"
+      ]
+    )
+  end
+
+  defp extract_data(pdf_path, "research_paper") do
+    ResearchPaperExtractor.extract_from_pdf(pdf_path)
+  end
+
+  defp extract_data(_pdf_path, type) do
+    {:error, {:unsupported_type, type}}
+  end
+
+  defp validate_quality(data, document_type) do
+    required_fields = get_required_fields(document_type)
+    DocumentQualityChecker.validate_extraction(data, required_fields)
+  end
+
+  defp get_required_fields("invoice") do
+    [[:invoice_number], [:invoice_date], [:vendor, :name],
+     [:customer, :name], [:total]]
+  end
+
+  defp get_required_fields("research_paper") do
+    [[:title], [:authors], [:abstract]]
+  end
+
+  defp save_extracted_data(data, user_id, classification) do
+    # Save to database with metadata
+    %{
+      user_id: user_id,
+      document_type: classification.document_type,
+      extracted_data: data,
+      confidence: classification.confidence,
+      processed_at: DateTime.utc_now()
+    }
+    # |> YourApp.Documents.create_extracted_document()
+  end
+end
+```
+
+## Testing with Mock Data
+
+Testing strategies without requiring actual VLM API calls:
+
+```elixir
+defmodule TestHelpers do
+  @moduledoc """
+  Test helpers for document extraction.
+  """
+
+  alias ExOutlines.Backend.Mock
+
+  def mock_invoice_extraction do
+    # Simulate successful invoice extraction
+    Mock.new([
+      {:ok, Jason.encode!(%{
+        invoice_number: "INV-TEST-001",
+        invoice_date: "2024-01-15",
+        vendor: %{name: "Test Vendor"},
+        customer: %{name: "Test Customer"},
+        line_items: [
+          %{description: "Service", quantity: 1, unit_price: 100.0, total: 100.0}
+        ],
+        subtotal: 100.0,
+        tax: 10.0,
+        total: 110.0,
+        currency: "USD"
+      })}
+    ])
+  end
+
+  def test_invoice_extraction do
+    # Use mock backend for testing
+    mock = mock_invoice_extraction()
+
+    result = InvoiceExtractor.extract_from_image("test_invoice.png",
+      backend: Mock,
+      backend_opts: [mock: mock]
+    )
+
+    case result do
+      {:ok, invoice} ->
+        IO.puts("Extraction successful")
+        IO.inspect(invoice)
+
+      {:error, reason} ->
+        IO.puts("Extraction failed: #{inspect(reason)}")
+    end
+  end
+end
+
+# Run test
+TestHelpers.test_invoice_extraction()
+```
+
+## Performance Optimization
+
+Tips for optimizing PDF processing:
+
+```elixir
+defmodule PerformanceOptimizer do
+  @moduledoc """
+  Performance optimization strategies for document processing.
+  """
+
+  @doc """
+  Optimize image quality vs. processing speed.
+
+  Lower DPI = faster processing, smaller images, lower quality
+  Higher DPI = slower processing, larger images, better quality
+
+  Recommended DPI by document type:
+  - Text documents (invoices, forms): 150 DPI
+  - Detailed diagrams: 200 DPI
+  - High-quality scans: 300 DPI
+  """
+  def optimal_dpi(document_type) do
+    case document_type do
+      type when type in ["invoice", "form", "letter"] -> 150
+      type when type in ["research_paper", "report"] -> 200
+      _ -> 150  # Default
+    end
+  end
+
+  @doc """
+  Process pages concurrently for multi-page documents.
+  """
+  def process_pages_concurrent(pdf_path, extractor_fun, opts \\ []) do
+    max_concurrency = Keyword.get(opts, :max_concurrency, 4)
+
+    with {:ok, images} <- PDFConverter.pdf_to_images(pdf_path, opts) do
+      results = images
+      |> Task.async_stream(
+        fn image_path -> extractor_fun.(image_path, opts) end,
+        max_concurrency: max_concurrency,
+        timeout: 30_000
+      )
+      |> Enum.map(fn
+        {:ok, result} -> result
+        {:exit, reason} -> {:error, reason}
+      end)
+
+      {:ok, results}
+    end
+  end
+
+  @doc """
+  Cache extracted data to avoid reprocessing.
+  """
+  def with_cache(pdf_path, extractor_fun, opts \\ []) do
+    cache_key = generate_cache_key(pdf_path)
+
+    case get_from_cache(cache_key) do
+      {:ok, cached_data} ->
+        {:ok, cached_data}
+
+      :miss ->
+        case extractor_fun.(pdf_path, opts) do
+          {:ok, data} = result ->
+            store_in_cache(cache_key, data)
+            result
+
+          error ->
+            error
+        end
+    end
+  end
+
+  defp generate_cache_key(pdf_path) do
+    # Use file path and modification time as cache key
+    stat = File.stat!(pdf_path)
+    :crypto.hash(:sha256, "#{pdf_path}-#{stat.mtime}")
+    |> Base.encode16()
+  end
+
+  defp get_from_cache(_key), do: :miss
+  defp store_in_cache(_key, _data), do: :ok
+end
+```
+
+## Summary
+
+This notebook demonstrated how to use vision-language models with ExOutlines to extract structured data from PDF documents. Key takeaways:
+
+1. **PDF to Image Conversion**: Convert PDFs to images using system tools or libraries
+2. **Schema Design**: Define comprehensive schemas for different document types
+3. **Multi-Page Processing**: Handle documents spanning multiple pages
+4. **Document Classification**: Route documents to appropriate extractors
+5. **Quality Validation**: Check extracted data for completeness and accuracy
+6. **Error Handling**: Implement robust error handling and retry logic
+7. **Production Integration**: Complete workflows for real applications
+8. **Performance**: Optimize for speed and cost
+
+Vision-language models excel at understanding document layout, tables, and visual elements that traditional OCR misses. Combined with ExOutlines' validation, you get both flexibility and reliability.
+
+Next steps:
+- Implement caching for frequently processed documents
+- Add human-in-the-loop review for low-confidence extractions
+- Create custom extractors for your specific document types
+- Monitor extraction quality and retrain on failures
+- Integrate with your document management system

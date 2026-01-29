@@ -1,0 +1,786 @@
+# Models Playing Chess
+
+## Introduction
+
+This notebook demonstrates how to constrain LLM outputs to valid actions within a structured domain. We'll have a model play chess against itself, ensuring every move complies with chess rules using structured generation.
+
+**Key Concept**: Instead of hoping the LLM generates valid moves, we constrain its output space to only legal moves for the current board position.
+
+**Learning Objectives:**
+
+* Constrain LLM output to domain-specific valid actions
+* Generate dynamic schemas based on game state
+* Implement turn-based game loops with LLMs
+* Validate complex domain rules
+* Handle stateful interactions with language models
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* Understanding of chess notation (helpful but not required)
+* OpenAI API key
+
+**Note**: This example uses simplified chess rules. For production chess engines, use a dedicated chess library.
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Understanding Chess Move Notation
+
+Chess moves are written in Standard Algebraic Notation (SAN):
+
+**Basic Moves:**
+- `e4` - Pawn to e4
+- `Nf3` - Knight to f3
+- `Bb5` - Bishop to b5
+- `Qd8` - Queen to d8
+- `Kf1` - King to f1
+
+**Special Notation:**
+- `O-O` - Kingside castling
+- `O-O-O` - Queenside castling
+- `x` - Capture (e.g., `Nxe5` - Knight captures on e5)
+- `+` - Check
+- `#` - Checkmate
+- `=Q` - Pawn promotion to Queen
+
+**Examples:**
+- `e2-e4` or `e4` - Pawn move
+- `Ng1-f3` or `Nf3` - Knight move
+- `Bb5xc6` or `Bxc6` - Bishop captures
+
+## Simplified Chess Implementation
+
+For demonstration purposes, we'll implement basic chess move validation. In production, use a full chess library.
+
+```elixir
+defmodule ChessBoard do
+  @moduledoc """
+  Simplified chess board representation and move validation.
+
+  This is a teaching implementation - production code should use
+  a proper chess library.
+  """
+
+  defstruct position: :start, moves: [], turn: :white, move_number: 1
+
+  @doc """
+  Initialize a new chess game.
+  """
+  def new do
+    %__MODULE__{
+      position: :start,
+      moves: [],
+      turn: :white,
+      move_number: 1
+    }
+  end
+
+  @doc """
+  Get legal moves for current position.
+
+  In a real implementation, this would analyze the board state.
+  For demonstration, we'll provide common opening moves and
+  simplify as the game progresses.
+  """
+  def legal_moves(%__MODULE__{turn: :white, moves: []}) do
+    # Opening moves for white
+    [
+      "e4",
+      "d4",
+      "Nf3",
+      "c4",
+      "g3"
+    ]
+  end
+
+  def legal_moves(%__MODULE__{turn: :black, moves: moves}) when length(moves) == 1 do
+    # Common responses to e4
+    [
+      "e5",
+      "c5",
+      "e6",
+      "c6",
+      "d6",
+      "Nf6"
+    ]
+  end
+
+  def legal_moves(%__MODULE__{turn: :white, moves: moves}) when length(moves) == 2 do
+    # White's second move options
+    [
+      "Nf3",
+      "Nc3",
+      "d4",
+      "Bc4",
+      "f4"
+    ]
+  end
+
+  def legal_moves(%__MODULE__{turn: :black, moves: moves}) when length(moves) == 3 do
+    # Black's second move options
+    [
+      "Nc6",
+      "d6",
+      "Nf6",
+      "Bc5",
+      "exd4"
+    ]
+  end
+
+  def legal_moves(%__MODULE__{}) do
+    # Simplified: after opening, allow common piece moves
+    [
+      "Nf3",
+      "Nf6",
+      "Nc3",
+      "Nc6",
+      "d4",
+      "d5",
+      "e4",
+      "e5",
+      "Bc4",
+      "Bc5",
+      "Bb5",
+      "Be7",
+      "O-O",
+      "Qe2",
+      "Qe7"
+    ]
+  end
+
+  @doc """
+  Apply a move to the board.
+  """
+  def apply_move(%__MODULE__{} = board, move) do
+    legal = legal_moves(board)
+
+    if move in legal do
+      new_board = %{
+        board
+        | moves: board.moves ++ [move],
+          turn: if(board.turn == :white, do: :black, else: :white),
+          move_number: if(board.turn == :black, do: board.move_number + 1, else: board.move_number)
+      }
+
+      {:ok, new_board}
+    else
+      {:error, "Illegal move: #{move} not in #{inspect(legal)}"}
+    end
+  end
+
+  @doc """
+  Format moves in standard notation.
+  """
+  def format_moves(%__MODULE__{moves: moves}) do
+    moves
+    |> Enum.chunk_every(2)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {pair, num} ->
+      case pair do
+        [white, black] -> "#{num}. #{white} #{black}"
+        [white] -> "#{num}. #{white}"
+      end
+    end)
+    |> Enum.join(" ")
+  end
+
+  @doc """
+  Check if game should end (simplified).
+  """
+  def game_over?(%__MODULE__{moves: moves}) do
+    # Simple rule: end after 10 moves (20 plies)
+    length(moves) >= 20
+  end
+end
+
+# Test the chess board
+board = ChessBoard.new()
+IO.puts("Initial position")
+IO.puts("Legal moves for white: #{inspect(ChessBoard.legal_moves(board))}")
+:ok
+```
+
+## Dynamic Schema Generation
+
+The key innovation: generate a schema that constrains the LLM to only legal moves for the current position.
+
+```elixir
+defmodule ChessSchemaGenerator do
+  @moduledoc """
+  Generate schemas that constrain LLM output to legal chess moves.
+  """
+
+  alias ExOutlines.Spec.Schema
+
+  @doc """
+  Create a schema that only allows legal moves for current board state.
+  """
+  def move_schema(board) do
+    legal_moves = ChessBoard.legal_moves(board)
+
+    Schema.new(%{
+      move: %{
+        type: {:enum, legal_moves},
+        required: true,
+        description: "Chess move in Standard Algebraic Notation (SAN)"
+      },
+      reasoning: %{
+        type: :string,
+        required: false,
+        max_length: 300,
+        description: "Brief reasoning for the move (optional)"
+      }
+    })
+  end
+
+  @doc """
+  Create the prompt for the current game state.
+  """
+  def move_prompt(board) do
+    current_player =
+      case board.turn do
+        :white -> "White"
+        :black -> "Black"
+      end
+
+    move_history =
+      if length(board.moves) > 0 do
+        ChessBoard.format_moves(board)
+      else
+        "No moves yet (starting position)"
+      end
+
+    legal_moves = ChessBoard.legal_moves(board)
+
+    """
+    You are playing chess as #{current_player}.
+
+    Current game state:
+    Move history: #{move_history}
+    Move number: #{board.move_number}
+    Your turn: #{current_player}
+
+    Legal moves available:
+    #{Enum.join(legal_moves, ", ")}
+
+    Select your move. Consider:
+    - Control the center
+    - Develop your pieces
+    - King safety
+    - Tactical opportunities
+
+    Choose one move from the legal moves list.
+    """
+  end
+end
+
+# Test schema generation
+test_board = ChessBoard.new()
+test_schema = ChessSchemaGenerator.move_schema(test_board)
+test_prompt = ChessSchemaGenerator.move_prompt(test_board)
+
+IO.puts("Generated schema for opening position:")
+IO.puts("\nLegal moves: #{inspect(ChessBoard.legal_moves(test_board))}")
+IO.puts("\nPrompt:")
+IO.puts(test_prompt)
+:ok
+```
+
+## Playing a Complete Game
+
+Now let's have the model play against itself.
+
+```elixir
+defmodule ChessGame do
+  @moduledoc """
+  Orchestrate a chess game between LLM instances.
+  """
+
+  alias ExOutlines.{Spec, Backend.HTTP}
+
+  @doc """
+  Play a complete game.
+
+  Options:
+  - api_key: OpenAI API key
+  - model: Model to use (default: "gpt-4o-mini")
+  - max_moves: Maximum number of moves (default: 20)
+  """
+  def play(opts \\ []) do
+    api_key = Keyword.fetch!(opts, :api_key)
+    model = Keyword.get(opts, :model, "gpt-4o-mini")
+    max_moves = Keyword.get(opts, :max_moves, 20)
+
+    board = ChessBoard.new()
+
+    IO.puts("\n" <> String.duplicate("=", 70))
+    IO.puts("Starting chess game: Model vs Model")
+    IO.puts(String.duplicate("=", 70))
+    IO.puts("\nOpening position\n")
+
+    play_loop(board, api_key, model, max_moves)
+  end
+
+  defp play_loop(board, api_key, model, max_moves) do
+    cond do
+      ChessBoard.game_over?(board) ->
+        IO.puts("\n" <> String.duplicate("=", 70))
+        IO.puts("Game Over")
+        IO.puts(String.duplicate("=", 70))
+        IO.puts("\nFinal move sequence:")
+        IO.puts(ChessBoard.format_moves(board))
+        {:ok, board}
+
+      length(board.moves) >= max_moves ->
+        IO.puts("\nReached maximum moves (#{max_moves})")
+        IO.puts("\nMove sequence:")
+        IO.puts(ChessBoard.format_moves(board))
+        {:ok, board}
+
+      true ->
+        # Generate next move
+        case generate_move(board, api_key, model) do
+          {:ok, move} ->
+            # Apply move
+            case ChessBoard.apply_move(board, move) do
+              {:ok, new_board} ->
+                current_player = if board.turn == :white, do: "White", else: "Black"
+
+                IO.puts(
+                  "#{board.move_number}. #{if board.turn == :black, do: "... "}#{current_player}: #{move}"
+                )
+
+                # Continue game
+                play_loop(new_board, api_key, model, max_moves)
+
+              {:error, reason} ->
+                IO.puts("Invalid move: #{reason}")
+                {:error, reason}
+            end
+
+          {:error, reason} ->
+            IO.puts("Failed to generate move: #{inspect(reason)}")
+            {:error, reason}
+        end
+    end
+  end
+
+  defp generate_move(board, api_key, model) do
+    schema = ChessSchemaGenerator.move_schema(board)
+    prompt = ChessSchemaGenerator.move_prompt(board)
+
+    # In production, use actual LLM generation:
+    # result = ExOutlines.generate(schema,
+    #   backend: HTTP,
+    #   backend_opts: [
+    #     api_key: api_key,
+    #     model: model,
+    #     messages: [
+    #       %{role: "system", content: "You are a chess player. Choose the best move."},
+    #       %{role: "user", content: prompt}
+    #     ]
+    #   ]
+    # )
+    #
+    # case result do
+    #   {:ok, data} -> {:ok, data.move}
+    #   {:error, reason} -> {:error, reason}
+    # end
+
+    # For demonstration without API calls, simulate move selection
+    legal_moves = ChessBoard.legal_moves(board)
+    selected_move = Enum.random(legal_moves)
+    {:ok, selected_move}
+  end
+end
+
+# Demonstrate the game (simulated moves without API)
+IO.puts("\nDemonstrating chess game with simulated moves:")
+IO.puts("(In production, each move would be generated by the LLM)\n")
+
+# Uncomment to play real game with API:
+# ChessGame.play(api_key: api_key, model: model, max_moves: 10)
+
+# Simulated demonstration
+demo_board = ChessBoard.new()
+
+demo_moves = [
+  "e4",
+  "e5",
+  "Nf3",
+  "Nc6",
+  "Bc4",
+  "Bc5",
+  "O-O",
+  "Nf6",
+  "d4",
+  "exd4"
+]
+
+IO.puts("Simulated game:")
+
+final_board =
+  Enum.reduce(demo_moves, demo_board, fn move, board ->
+    case ChessBoard.apply_move(board, move) do
+      {:ok, new_board} ->
+        player = if board.turn == :white, do: "White", else: "Black"
+        IO.puts("#{board.move_number}. #{if board.turn == :black, do: "... "}#{player}: #{move}")
+        new_board
+
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+        board
+    end
+  end)
+
+IO.puts("\nFinal position:")
+IO.puts(ChessBoard.format_moves(final_board))
+:ok
+```
+
+## Analyzing Move Quality
+
+Let's add analysis to evaluate move quality.
+
+```elixir
+defmodule ChessMoveAnalyzer do
+  @moduledoc """
+  Analyze chess moves for quality and patterns.
+  """
+
+  @doc """
+  Classify move type.
+  """
+  def move_type(move) do
+    cond do
+      move in ["O-O", "O-O-O"] -> :castling
+      String.contains?(move, "x") -> :capture
+      String.match?(move, ~r/^[a-h][1-8]$/) -> :pawn_move
+      String.match?(move, ~r/^[NBRQK]/) -> :piece_move
+      true -> :unknown
+    end
+  end
+
+  @doc """
+  Analyze game for patterns.
+  """
+  def analyze_game(board) do
+    moves = board.moves
+
+    move_types =
+      moves
+      |> Enum.map(&move_type/1)
+      |> Enum.frequencies()
+
+    %{
+      total_moves: length(moves),
+      move_types: move_types,
+      opening_moves: Enum.take(moves, 6),
+      castling_occurred: Enum.any?(moves, fn m -> m in ["O-O", "O-O-O"] end),
+      captures: Enum.count(moves, fn m -> String.contains?(m, "x") end)
+    }
+  end
+
+  @doc """
+  Generate analysis report.
+  """
+  def report(board) do
+    analysis = analyze_game(board)
+
+    IO.puts("\n" <> String.duplicate("=", 70))
+    IO.puts("Game Analysis")
+    IO.puts(String.duplicate("=", 70))
+    IO.puts("\nTotal moves: #{analysis.total_moves}")
+    IO.puts("\nMove types:")
+
+    Enum.each(analysis.move_types, fn {type, count} ->
+      IO.puts("  #{type}: #{count}")
+    end)
+
+    IO.puts("\nOpening: #{Enum.join(analysis.opening_moves, " ")}")
+    IO.puts("Castling occurred: #{analysis.castling_occurred}")
+    IO.puts("Total captures: #{analysis.captures}")
+
+    analysis
+  end
+end
+
+# Analyze the demo game
+ChessMoveAnalyzer.report(final_board)
+```
+
+## Interactive Game Player
+
+Create an interactive interface to play move by move.
+
+```elixir
+# Interactive game controller
+defmodule InteractiveChess do
+  def start do
+    board = ChessBoard.new()
+    IO.puts("\nStarting interactive chess game")
+    IO.puts("The model will play both sides\n")
+    {:ok, board}
+  end
+
+  def next_move(board, api_key, model) do
+    schema = ChessSchemaGenerator.move_schema(board)
+    prompt = ChessSchemaGenerator.move_prompt(board)
+
+    IO.puts("\n--- #{if board.turn == :white, do: "White", else: "Black"}'s turn ---")
+    IO.puts("Legal moves: #{Enum.join(ChessBoard.legal_moves(board), ", ")}")
+
+    # Generate move (simulated)
+    legal_moves = ChessBoard.legal_moves(board)
+    selected_move = Enum.random(legal_moves)
+
+    IO.puts("Model selected: #{selected_move}")
+
+    case ChessBoard.apply_move(board, selected_move) do
+      {:ok, new_board} ->
+        IO.puts("\nMove history: #{ChessBoard.format_moves(new_board)}")
+        {:ok, new_board}
+
+      {:error, reason} ->
+        IO.puts("Invalid move: #{reason}")
+        {:error, reason}
+    end
+  end
+end
+
+# Use Kino buttons for interactive play
+{:ok, game_board} = InteractiveChess.start()
+
+next_move_button = Kino.Control.button("Next Move")
+Kino.render(next_move_button)
+
+# Track game state
+game_state = Agent.start_link(fn -> game_board end)
+
+Kino.listen(next_move_button, fn _event ->
+  {:ok, pid} = game_state
+  current_board = Agent.get(pid, & &1)
+
+  if not ChessBoard.game_over?(current_board) do
+    case InteractiveChess.next_move(current_board, api_key, model) do
+      {:ok, new_board} ->
+        Agent.update(pid, fn _ -> new_board end)
+
+      {:error, _reason} ->
+        :ok
+    end
+  else
+    IO.puts("\nGame Over!")
+    ChessMoveAnalyzer.report(current_board)
+  end
+end)
+```
+
+## Production Chess Integration
+
+For real chess applications, integrate with a proper chess library.
+
+```elixir
+# Example integration with a hypothetical chess library
+defmodule ProductionChess do
+  @moduledoc """
+  Production-ready chess integration pattern.
+
+  In real code, use a proper chess library like:
+  - binbo (Erlang chess library)
+  - Or call external chess engines via ports
+  """
+
+  def play_game(opts \\ []) do
+    """
+    # Real implementation would:
+
+    # 1. Initialize chess engine
+    {:ok, game} = ChessEngine.new()
+
+    # 2. Get legal moves in standard format
+    legal_moves = ChessEngine.legal_moves(game)
+    # Returns: ["e2e4", "d2d4", "Ng1f3", ...]
+
+    # 3. Create dynamic schema
+    schema = Schema.new(%{
+      move: %{type: {:enum, legal_moves}, required: true}
+    })
+
+    # 4. Generate with LLM
+    {:ok, result} = ExOutlines.generate(schema,
+      backend: HTTP,
+      backend_opts: [
+        api_key: System.get_env("OPENAI_API_KEY"),
+        model: "gpt-4o-mini",
+        messages: [
+          %{role: "system", content: "You are a chess grandmaster."},
+          %{role: "user", content: build_chess_prompt(game)}
+        ]
+      ]
+    )
+
+    # 5. Apply move to engine
+    {:ok, new_game} = ChessEngine.make_move(game, result.move)
+
+    # 6. Check game status
+    case ChessEngine.status(new_game) do
+      :ongoing -> continue_game(new_game)
+      :checkmate -> {:winner, ChessEngine.winner(new_game)}
+      :stalemate -> {:draw, :stalemate}
+      :draw -> {:draw, :insufficient_material}
+    end
+    """
+
+    IO.puts("""
+    Production chess integration pattern:
+
+    1. Use a real chess library (binbo, or external engine)
+    2. Get legal moves from the engine
+    3. Generate dynamic schema with legal moves as enum
+    4. LLM selects from legal moves only
+    5. Validate and apply move through engine
+    6. Check for checkmate/stalemate/draw
+    7. Continue until game ends
+
+    Benefits:
+    - Guaranteed legal moves
+    - Full chess rules validation
+    - Proper game state tracking
+    - Checkmate/stalemate detection
+    - Standard chess formats (FEN, PGN)
+    """)
+  end
+end
+
+ProductionChess.play_game()
+```
+
+## Key Insights from LLM Chess
+
+When LLMs play chess with structured generation:
+
+**Observations:**
+
+1. **Cautious Play**: Models often avoid captures, preferring positional moves
+2. **Opening Knowledge**: Strong opening theory from training data
+3. **Tactical Blindness**: May miss obvious tactics if not in legal move set
+4. **Consistency**: Structured generation ensures legal moves every time
+
+**Without Structured Generation:**
+
+- 30-40% of moves might be illegal
+- Invalid notation
+- Impossible piece movements
+- Game breaks frequently
+
+**With Structured Generation:**
+
+- 100% legal moves (by construction)
+- Game always progresses
+- Can complete full games
+- Focus shifts to move quality, not legality
+
+## Real-World Applications
+
+Beyond chess, this pattern applies to many domains:
+
+**Game AI:**
+- Card games (poker, bridge)
+- Board games (Go, checkers)
+- Video game NPCs with valid actions
+
+**Code Generation:**
+- Constrain to valid syntax
+- Only allow defined function names
+- Ensure proper API usage
+
+**Form Filling:**
+- Only valid options for dropdowns
+- Proper format for phone/email
+- Valid state codes, zip codes
+
+**Workflow Systems:**
+- Only allowed next steps
+- Valid state transitions
+- Proper approval chains
+
+## Key Takeaways
+
+**Structured Generation Pattern:**
+
+1. Analyze current state (board position)
+2. Determine valid actions (legal moves)
+3. Create dynamic schema (enum of legal moves)
+4. Generate with LLM (constrained to valid actions)
+5. Apply action and update state
+6. Repeat until goal reached
+
+**Schema Design:**
+
+* Use enums for discrete valid actions
+* Generate schemas dynamically based on state
+* Keep prompts focused on strategy, not rules
+* Let schema enforcement handle validation
+
+**Production Considerations:**
+
+* Use proper game/domain libraries
+* Handle edge cases (draws, stalemates)
+* Monitor move quality over time
+* Consider adding move evaluation
+* Log full game history for analysis
+
+**Advantages:**
+
+* Guaranteed valid outputs
+* No need to parse complex notations
+* Focus LLM on strategy, not rules
+* Reliable game progression
+* Can create complete systems
+
+## Challenges
+
+Try these exercises:
+
+1. Add move evaluation (scoring move quality)
+2. Implement basic tactics detection
+3. Create multiple playing styles (aggressive, defensive)
+4. Add game analysis after completion
+5. Implement chess puzzles (mate in N moves)
+6. Compare different models' playing styles
+7. Add opening book for first 5 moves
+
+## Next Steps
+
+* Try the **ReAct Agent** notebook for multi-step reasoning (when implemented)
+* Explore the **Chain of Thought** notebook for reasoning chains (when implemented)
+* Read the **Schema Patterns** guide for dynamic schema generation
+* Check the **Batch Processing** guide for tournament systems
+
+## Further Reading
+
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)
+* Chess programming resources
+* Game AI with constrained generation

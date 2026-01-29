@@ -1,0 +1,1297 @@
+# Earnings Reports: Financial Data Extraction
+
+```elixir
+Mix.install([
+  {:ex_outlines, path: Path.join(__DIR__, "..")},
+  {:req, "~> 0.5.0"},
+  {:jason, "~> 1.4"},
+  {:decimal, "~> 2.0"},
+  {:nimble_csv, "~> 1.2"}
+])
+```
+
+## Introduction
+
+This notebook demonstrates how to extract structured financial data from earnings reports, quarterly filings, and other financial documents. These documents often contain:
+
+- Inconsistent formatting across pages and sections
+- Tables with varying structures
+- Numbers in different units (thousands, millions, billions)
+- Multiple currencies and accounting periods
+- Complex financial terminology
+
+ExOutlines helps extract this data into clean, structured formats suitable for analysis, visualization, or database storage.
+
+Real-world applications:
+- Automated financial data entry
+- Competitive intelligence gathering
+- Investment research automation
+- Regulatory compliance reporting
+- Historical financial analysis
+
+## Financial Data Challenges
+
+Common challenges in financial document extraction:
+
+1. **Unit Variations**: Numbers may be in thousands, millions, or billions
+2. **Currency Mixing**: Multiple currencies in same document
+3. **Fiscal Periods**: Q1 vs calendar year, fiscal year variations
+4. **Negative Numbers**: Represented as (1,234) or -1,234
+5. **Percentage vs Absolute**: Mixed in same tables
+6. **Missing Data**: N/A, dash, blank cells
+7. **Footnotes**: References to notes that explain calculations
+
+## Schema Design for Financial Data
+
+```elixir
+defmodule FinancialSchemas do
+  @moduledoc """
+  Schemas for extracting financial data from earnings reports.
+  """
+
+  alias ExOutlines.Spec.Schema
+
+  @doc """
+  Schema for a single financial metric with context.
+  """
+  def financial_metric_schema do
+    Schema.new(%{
+      name: %{
+        type: :string,
+        required: true,
+        description: "Name of the financial metric (e.g., 'Revenue', 'Net Income')"
+      },
+      value: %{
+        type: :number,
+        required: true,
+        description: "Numerical value"
+      },
+      unit: %{
+        type: {:enum, ["actual", "thousands", "millions", "billions"]},
+        required: true,
+        description: "Unit scale of the value"
+      },
+      currency: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^[A-Z]{3}$/,
+        description: "Currency code (ISO 4217)"
+      },
+      period: %{
+        type: :string,
+        required: true,
+        description: "Time period (e.g., 'Q1 2024', 'FY 2023')"
+      },
+      period_type: %{
+        type: {:enum, ["quarter", "annual", "ttm", "ytd"]},
+        required: true,
+        description: "Type of reporting period"
+      }
+    })
+  end
+
+  @doc """
+  Schema for income statement data.
+  """
+  def income_statement_schema do
+    Schema.new(%{
+      company_name: %{
+        type: :string,
+        required: true,
+        description: "Company name"
+      },
+      reporting_period: %{
+        type: :string,
+        required: true,
+        description: "Period being reported (e.g., 'Q4 2023')"
+      },
+      fiscal_year: %{
+        type: :integer,
+        required: true,
+        min: 2000,
+        max: 2100,
+        description: "Fiscal year"
+      },
+      currency: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^[A-Z]{3}$/,
+        description: "Currency for all amounts"
+      },
+      unit_scale: %{
+        type: {:enum, ["actual", "thousands", "millions", "billions"]},
+        required: true,
+        description: "Unit scale for all amounts"
+      },
+      revenue: %{
+        type: :number,
+        required: true,
+        description: "Total revenue"
+      },
+      cost_of_revenue: %{
+        type: :number,
+        required: false,
+        description: "Cost of goods sold / Cost of revenue"
+      },
+      gross_profit: %{
+        type: :number,
+        required: true,
+        description: "Gross profit"
+      },
+      operating_expenses: %{
+        type: :number,
+        required: false,
+        description: "Total operating expenses"
+      },
+      operating_income: %{
+        type: :number,
+        required: true,
+        description: "Operating income / Operating profit"
+      },
+      net_income: %{
+        type: :number,
+        required: true,
+        description: "Net income / Net earnings"
+      },
+      earnings_per_share: %{
+        type: :number,
+        required: false,
+        description: "Earnings per share (diluted)"
+      },
+      shares_outstanding: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Diluted shares outstanding (in millions)"
+      }
+    })
+  end
+
+  @doc """
+  Schema for balance sheet data.
+  """
+  def balance_sheet_schema do
+    Schema.new(%{
+      company_name: %{type: :string, required: true},
+      as_of_date: %{
+        type: :string,
+        required: true,
+        pattern: ~r/^\d{4}-\d{2}-\d{2}$/,
+        description: "Balance sheet date (YYYY-MM-DD)"
+      },
+      currency: %{type: :string, required: true, pattern: ~r/^[A-Z]{3}$/},
+      unit_scale: %{
+        type: {:enum, ["actual", "thousands", "millions", "billions"]},
+        required: true
+      },
+      total_assets: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Total assets"
+      },
+      current_assets: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Current assets"
+      },
+      cash_and_equivalents: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Cash and cash equivalents"
+      },
+      total_liabilities: %{
+        type: :number,
+        required: true,
+        min: 0,
+        description: "Total liabilities"
+      },
+      current_liabilities: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Current liabilities"
+      },
+      total_equity: %{
+        type: :number,
+        required: true,
+        description: "Total shareholders' equity"
+      }
+    })
+  end
+
+  @doc """
+  Schema for cash flow statement.
+  """
+  def cash_flow_schema do
+    Schema.new(%{
+      company_name: %{type: :string, required: true},
+      reporting_period: %{type: :string, required: true},
+      fiscal_year: %{type: :integer, required: true, min: 2000, max: 2100},
+      currency: %{type: :string, required: true, pattern: ~r/^[A-Z]{3}$/},
+      unit_scale: %{
+        type: {:enum, ["actual", "thousands", "millions", "billions"]},
+        required: true
+      },
+      operating_cash_flow: %{
+        type: :number,
+        required: true,
+        description: "Cash from operating activities"
+      },
+      investing_cash_flow: %{
+        type: :number,
+        required: true,
+        description: "Cash from investing activities"
+      },
+      financing_cash_flow: %{
+        type: :number,
+        required: true,
+        description: "Cash from financing activities"
+      },
+      net_change_in_cash: %{
+        type: :number,
+        required: true,
+        description: "Net change in cash"
+      },
+      capital_expenditures: %{
+        type: :number,
+        required: false,
+        description: "Capital expenditures (usually negative)"
+      },
+      free_cash_flow: %{
+        type: :number,
+        required: false,
+        description: "Free cash flow (operating CF - capex)"
+      }
+    })
+  end
+
+  @doc """
+  Schema for key financial ratios.
+  """
+  def financial_ratios_schema do
+    Schema.new(%{
+      company_name: %{type: :string, required: true},
+      reporting_period: %{type: :string, required: true},
+      gross_margin: %{
+        type: :number,
+        required: false,
+        min: -100,
+        max: 100,
+        description: "Gross profit margin percentage"
+      },
+      operating_margin: %{
+        type: :number,
+        required: false,
+        min: -100,
+        max: 100,
+        description: "Operating margin percentage"
+      },
+      net_margin: %{
+        type: :number,
+        required: false,
+        min: -100,
+        max: 100,
+        description: "Net profit margin percentage"
+      },
+      return_on_assets: %{
+        type: :number,
+        required: false,
+        min: -100,
+        max: 100,
+        description: "Return on assets (ROA) percentage"
+      },
+      return_on_equity: %{
+        type: :number,
+        required: false,
+        min: -100,
+        max: 100,
+        description: "Return on equity (ROE) percentage"
+      },
+      debt_to_equity: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Debt-to-equity ratio"
+      },
+      current_ratio: %{
+        type: :number,
+        required: false,
+        min: 0,
+        description: "Current ratio (current assets / current liabilities)"
+      }
+    })
+  end
+end
+```
+
+## Example 1: Income Statement Extraction
+
+Extract quarterly income statement from earnings report text:
+
+```elixir
+defmodule IncomeStatementExtractor do
+  @moduledoc """
+  Extract income statement data from earnings reports.
+  """
+
+  alias ExOutlines.{Spec, Backend.Mock}
+  alias FinancialSchemas
+
+  def extract_from_text(report_text, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    messages = [
+      %{
+        role: "system",
+        content: """
+        You are a financial data extraction specialist. Extract income statement
+        data from earnings reports with precision. Pay attention to:
+        - Currency and unit scales (thousands, millions, billions)
+        - Fiscal periods vs calendar periods
+        - Negative numbers indicated by parentheses
+        - GAAP vs Non-GAAP figures (prefer GAAP unless specified)
+        """
+      },
+      %{
+        role: "user",
+        content: """
+        Extract the income statement data from this earnings report:
+
+        #{report_text}
+
+        Provide all monetary values in the same unit scale and currency.
+        If values are shown in millions, set unit_scale to "millions" and
+        provide values as they appear (e.g., 1234.5 for $1,234.5M).
+        """
+      }
+    ]
+
+    schema = FinancialSchemas.income_statement_schema()
+
+    case Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages,
+      max_retries: 3
+    ) do
+      {:ok, data} ->
+        # Validate financial relationships
+        validate_income_statement(data)
+
+      error ->
+        error
+    end
+  end
+
+  defp validate_income_statement(data) do
+    errors = []
+
+    # Gross profit should equal revenue - cost of revenue
+    if data[:cost_of_revenue] do
+      expected_gross = data.revenue - data.cost_of_revenue
+      diff = abs(expected_gross - data.gross_profit)
+
+      if diff > 0.01 * data.revenue do  # Allow 1% variance
+        errors = errors ++ ["Gross profit calculation mismatch"]
+      end
+    end
+
+    # Operating income should be <= gross profit
+    if data.operating_income > data.gross_profit * 1.01 do
+      errors = errors ++ ["Operating income exceeds gross profit"]
+    end
+
+    # Net income should generally be <= operating income
+    if data.net_income > data.operating_income * 1.5 do
+      errors = errors ++ ["Net income significantly exceeds operating income"]
+    end
+
+    case errors do
+      [] -> {:ok, data}
+      issues -> {:warning, data, issues}
+    end
+  end
+end
+```
+
+## Example Income Statement Data
+
+```elixir
+# Example earnings report text
+sample_report = """
+ACME CORPORATION
+CONDENSED CONSOLIDATED STATEMENTS OF INCOME
+(In millions, except per share amounts)
+(Unaudited)
+
+Three Months Ended December 31, 2023
+
+Revenue                                   $ 50,123
+Cost of revenue                            (18,450)
+                                          --------
+Gross profit                               31,673
+
+Operating expenses:
+  Research and development                  (8,234)
+  Sales and marketing                       (7,891)
+  General and administrative                (2,456)
+                                          --------
+Total operating expenses                  (18,581)
+
+Operating income                           13,092
+
+Other income, net                             234
+                                          --------
+Income before taxes                        13,326
+
+Provision for income taxes                 (2,665)
+                                          --------
+Net income                                $ 10,661
+
+Earnings per share - diluted              $  1.23
+
+Diluted shares outstanding                  8,667
+"""
+
+# Extract with mock backend for demonstration
+mock_response = %{
+  company_name: "ACME Corporation",
+  reporting_period: "Q4 2023",
+  fiscal_year: 2023,
+  currency: "USD",
+  unit_scale: "millions",
+  revenue: 50123,
+  cost_of_revenue: 18450,
+  gross_profit: 31673,
+  operating_expenses: 18581,
+  operating_income: 13092,
+  net_income: 10661,
+  earnings_per_share: 1.23,
+  shares_outstanding: 8667
+}
+
+mock = Mock.new([{:ok, Jason.encode!(mock_response)}])
+
+{:ok, income_statement} = IncomeStatementExtractor.extract_from_text(
+  sample_report,
+  backend: Mock,
+  backend_opts: [mock: mock]
+)
+
+IO.inspect(income_statement, label: "Extracted Income Statement")
+
+# Calculate key metrics
+gross_margin = (income_statement.gross_profit / income_statement.revenue) * 100
+operating_margin = (income_statement.operating_income / income_statement.revenue) * 100
+net_margin = (income_statement.net_income / income_statement.revenue) * 100
+
+IO.puts("\nCalculated Margins:")
+IO.puts("Gross Margin: #{Float.round(gross_margin, 2)}%")
+IO.puts("Operating Margin: #{Float.round(operating_margin, 2)}%")
+IO.puts("Net Margin: #{Float.round(net_margin, 2)}%")
+```
+
+## Example 2: Multi-Period Comparison
+
+Extract data from reports showing multiple periods:
+
+```elixir
+defmodule MultiPeriodExtractor do
+  @moduledoc """
+  Extract financial data spanning multiple periods.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+  alias FinancialSchemas
+
+  def multi_period_schema do
+    # Create schema for array of income statements
+    Schema.new(%{
+      company_name: %{type: :string, required: true},
+      periods: %{
+        type: {:array, %{type: {:object, FinancialSchemas.income_statement_schema()}}},
+        required: true,
+        min_items: 1,
+        max_items: 12,
+        description: "Financial data for multiple periods"
+      },
+      comparison_type: %{
+        type: {:enum, ["yoy", "qoq", "sequential"]},
+        required: true,
+        description: "Type of period comparison"
+      }
+    })
+  end
+
+  def extract_comparison(report_text, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    messages = [
+      %{
+        role: "user",
+        content: """
+        Extract financial data for ALL periods shown in this report:
+
+        #{report_text}
+
+        Include data for each period shown. Ensure consistency in:
+        - Currency (same for all periods)
+        - Unit scale (same for all periods)
+        - Line item names (standardized across periods)
+        """
+      }
+    ]
+
+    schema = multi_period_schema()
+
+    Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages
+    )
+  end
+
+  def calculate_growth_rates(multi_period_data) do
+    periods = multi_period_data.periods
+    |> Enum.sort_by(& &1.fiscal_year)
+
+    Enum.chunk_every(periods, 2, 1, :discard)
+    |> Enum.map(fn [previous, current] ->
+      %{
+        period: current.reporting_period,
+        revenue_growth: calculate_growth(previous.revenue, current.revenue),
+        net_income_growth: calculate_growth(previous.net_income, current.net_income),
+        operating_income_growth: calculate_growth(previous.operating_income, current.operating_income)
+      }
+    end)
+  end
+
+  defp calculate_growth(previous, current) do
+    if previous != 0 do
+      ((current - previous) / abs(previous)) * 100
+      |> Float.round(2)
+    else
+      nil
+    end
+  end
+end
+```
+
+## Example Multi-Period Report
+
+```elixir
+multi_period_report = """
+TECHCORP INC.
+CONDENSED STATEMENTS OF INCOME
+(In millions, except per share data)
+
+                                Q4 2023    Q3 2023    Q4 2022
+Revenue                         $45,678    $42,123    $38,901
+Cost of revenue                 (15,234)   (14,890)   (13,567)
+Gross profit                     30,444     27,233     25,334
+
+Operating expenses              (18,234)   (17,890)   (16,123)
+Operating income                 12,210      9,343      9,211
+
+Net income                      $ 9,768    $ 7,475    $ 7,368
+
+Earnings per share - diluted    $  1.15    $  0.88    $  0.87
+"""
+
+# Mock response for multi-period data
+mock_multi_period = %{
+  company_name: "TECHCORP Inc.",
+  comparison_type: "yoy",
+  periods: [
+    %{
+      company_name: "TECHCORP Inc.",
+      reporting_period: "Q4 2022",
+      fiscal_year: 2022,
+      currency: "USD",
+      unit_scale: "millions",
+      revenue: 38901,
+      cost_of_revenue: 13567,
+      gross_profit: 25334,
+      operating_expenses: 16123,
+      operating_income: 9211,
+      net_income: 7368,
+      earnings_per_share: 0.87,
+      shares_outstanding: nil
+    },
+    %{
+      company_name: "TECHCORP Inc.",
+      reporting_period: "Q3 2023",
+      fiscal_year: 2023,
+      currency: "USD",
+      unit_scale: "millions",
+      revenue: 42123,
+      cost_of_revenue: 14890,
+      gross_profit: 27233,
+      operating_expenses: 17890,
+      operating_income: 9343,
+      net_income: 7475,
+      earnings_per_share: 0.88,
+      shares_outstanding: nil
+    },
+    %{
+      company_name: "TECHCORP Inc.",
+      reporting_period: "Q4 2023",
+      fiscal_year: 2023,
+      currency: "USD",
+      unit_scale: "millions",
+      revenue: 45678,
+      cost_of_revenue: 15234,
+      gross_profit: 30444,
+      operating_expenses: 18234,
+      operating_income: 12210,
+      net_income: 9768,
+      earnings_per_share: 1.15,
+      shares_outstanding: nil
+    }
+  ]
+}
+
+mock = Mock.new([{:ok, Jason.encode!(mock_multi_period)}])
+
+{:ok, comparison_data} = MultiPeriodExtractor.extract_comparison(
+  multi_period_report,
+  backend: Mock,
+  backend_opts: [mock: mock]
+)
+
+growth_rates = MultiPeriodExtractor.calculate_growth_rates(comparison_data)
+
+IO.puts("\nGrowth Rate Analysis:")
+Enum.each(growth_rates, fn period_growth ->
+  IO.puts("\n#{period_growth.period}:")
+  IO.puts("  Revenue Growth: #{period_growth.revenue_growth}%")
+  IO.puts("  Operating Income Growth: #{period_growth.operating_income_growth}%")
+  IO.puts("  Net Income Growth: #{period_growth.net_income_growth}%")
+end)
+```
+
+## Example 3: CSV Export for Analysis
+
+Convert extracted financial data to CSV format:
+
+```elixir
+defmodule FinancialDataExporter do
+  @moduledoc """
+  Export extracted financial data to CSV format.
+  """
+
+  NimbleCSV.define(FinancialCSV, separator: ",", escape: "\"")
+
+  def income_statement_to_csv(income_statements) when is_list(income_statements) do
+    headers = [
+      "Company",
+      "Period",
+      "Fiscal Year",
+      "Currency",
+      "Unit Scale",
+      "Revenue",
+      "Cost of Revenue",
+      "Gross Profit",
+      "Operating Expenses",
+      "Operating Income",
+      "Net Income",
+      "EPS",
+      "Shares Outstanding"
+    ]
+
+    rows = Enum.map(income_statements, fn stmt ->
+      [
+        stmt.company_name,
+        stmt.reporting_period,
+        to_string(stmt.fiscal_year),
+        stmt.currency,
+        stmt.unit_scale,
+        format_number(stmt.revenue),
+        format_number(stmt[:cost_of_revenue]),
+        format_number(stmt.gross_profit),
+        format_number(stmt[:operating_expenses]),
+        format_number(stmt.operating_income),
+        format_number(stmt.net_income),
+        format_number(stmt[:earnings_per_share]),
+        format_number(stmt[:shares_outstanding])
+      ]
+    end)
+
+    FinancialCSV.dump_to_iodata([headers | rows])
+  end
+
+  def export_to_file(income_statements, file_path) do
+    csv_data = income_statement_to_csv(income_statements)
+    File.write!(file_path, csv_data)
+    {:ok, file_path}
+  end
+
+  defp format_number(nil), do: ""
+  defp format_number(num) when is_number(num) do
+    # Format with 2 decimal places
+    :erlang.float_to_binary(num / 1, decimals: 2)
+  end
+  defp format_number(num), do: to_string(num)
+
+  def create_summary_csv(multi_period_data, file_path) do
+    # Create a summary with calculated metrics
+    headers = [
+      "Period",
+      "Revenue",
+      "Gross Margin %",
+      "Operating Margin %",
+      "Net Margin %",
+      "Revenue Growth %",
+      "YoY Revenue Change"
+    ]
+
+    periods = multi_period_data.periods
+    |> Enum.sort_by(& &1.fiscal_year)
+
+    rows = Enum.with_index(periods)
+    |> Enum.map(fn {period, idx} ->
+      gross_margin = (period.gross_profit / period.revenue) * 100
+      operating_margin = (period.operating_income / period.revenue) * 100
+      net_margin = (period.net_income / period.revenue) * 100
+
+      # Calculate YoY growth if previous period exists
+      {revenue_growth, revenue_change} = if idx > 0 do
+        previous = Enum.at(periods, idx - 1)
+        growth = ((period.revenue - previous.revenue) / previous.revenue) * 100
+        change = period.revenue - previous.revenue
+        {Float.round(growth, 2), change}
+      else
+        {nil, nil}
+      end
+
+      [
+        period.reporting_period,
+        format_number(period.revenue),
+        format_number(gross_margin),
+        format_number(operating_margin),
+        format_number(net_margin),
+        format_number(revenue_growth),
+        format_number(revenue_change)
+      ]
+    end)
+
+    csv_data = FinancialCSV.dump_to_iodata([headers | rows])
+    File.write!(file_path, csv_data)
+    {:ok, file_path}
+  end
+end
+```
+
+## Generate CSV Files
+
+```elixir
+# Export single period data
+output_file = Path.join(System.tmp_dir!(), "income_statement.csv")
+{:ok, path} = FinancialDataExporter.export_to_file([income_statement], output_file)
+IO.puts("Exported income statement to: #{path}")
+
+# Export multi-period summary
+summary_file = Path.join(System.tmp_dir!(), "financial_summary.csv")
+{:ok, summary_path} = FinancialDataExporter.create_summary_csv(comparison_data, summary_file)
+IO.puts("Exported summary to: #{summary_path}")
+
+# Read and display CSV content
+IO.puts("\nIncome Statement CSV:")
+IO.puts(File.read!(path))
+
+IO.puts("\nFinancial Summary CSV:")
+IO.puts(File.read!(summary_path))
+```
+
+## Example 4: Balance Sheet Extraction
+
+Extract balance sheet data with asset/liability validation:
+
+```elixir
+defmodule BalanceSheetExtractor do
+  @moduledoc """
+  Extract and validate balance sheet data.
+  """
+
+  alias ExOutlines.{Spec, Backend.Mock}
+  alias FinancialSchemas
+
+  def extract_balance_sheet(report_text, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    messages = [
+      %{
+        role: "system",
+        content: """
+        You are extracting balance sheet data. Remember the fundamental equation:
+        Assets = Liabilities + Equity
+
+        Pay attention to:
+        - Current vs non-current classifications
+        - Positive values for assets and liabilities
+        - Equity can be negative (accumulated deficit)
+        """
+      },
+      %{
+        role: "user",
+        content: "Extract balance sheet data from:\n\n#{report_text}"
+      }
+    ]
+
+    schema = FinancialSchemas.balance_sheet_schema()
+
+    case Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages
+    ) do
+      {:ok, data} ->
+        validate_balance_sheet(data)
+
+      error ->
+        error
+    end
+  end
+
+  defp validate_balance_sheet(data) do
+    # Verify accounting equation: Assets = Liabilities + Equity
+    left_side = data.total_assets
+    right_side = data.total_liabilities + data.total_equity
+
+    diff = abs(left_side - right_side)
+    tolerance = 0.01 * data.total_assets  # 1% tolerance
+
+    if diff > tolerance do
+      {:error, {:accounting_equation_violation,
+        "Assets (#{left_side}) != Liabilities (#{data.total_liabilities}) + " <>
+        "Equity (#{data.total_equity}) = #{right_side}"}}
+    else
+      {:ok, data}
+    end
+  end
+end
+```
+
+## Example Balance Sheet
+
+```elixir
+balance_sheet_text = """
+ACME CORPORATION
+CONSOLIDATED BALANCE SHEET
+As of December 31, 2023
+(In millions)
+
+ASSETS
+Current assets:
+  Cash and cash equivalents          $ 15,234
+  Accounts receivable                  12,456
+  Inventory                             8,901
+  Other current assets                  3,456
+                                      --------
+Total current assets                   40,047
+
+Property and equipment, net            23,456
+Intangible assets                      15,678
+Other long-term assets                  8,234
+                                      --------
+Total assets                         $ 87,415
+
+LIABILITIES AND SHAREHOLDERS' EQUITY
+Current liabilities:
+  Accounts payable                    $  8,234
+  Accrued expenses                      7,890
+  Short-term debt                       2,345
+                                      --------
+Total current liabilities              18,469
+
+Long-term debt                         25,678
+Other long-term liabilities             5,432
+                                      --------
+Total liabilities                      49,579
+
+Shareholders' equity:
+  Common stock and APIC                 12,345
+  Retained earnings                     25,491
+                                      --------
+Total shareholders' equity             37,836
+                                      --------
+Total liabilities and equity         $ 87,415
+"""
+
+mock_balance_sheet = %{
+  company_name: "ACME Corporation",
+  as_of_date: "2023-12-31",
+  currency: "USD",
+  unit_scale: "millions",
+  total_assets: 87415,
+  current_assets: 40047,
+  cash_and_equivalents: 15234,
+  total_liabilities: 49579,
+  current_liabilities: 18469,
+  total_equity: 37836
+}
+
+mock = Mock.new([{:ok, Jason.encode!(mock_balance_sheet)}])
+
+{:ok, balance_sheet} = BalanceSheetExtractor.extract_balance_sheet(
+  balance_sheet_text,
+  backend: Mock,
+  backend_opts: [mock: mock]
+)
+
+IO.inspect(balance_sheet, label: "Extracted Balance Sheet")
+
+# Calculate financial ratios
+current_ratio = balance_sheet.current_assets / balance_sheet.current_liabilities
+debt_to_equity = balance_sheet.total_liabilities / balance_sheet.total_equity
+
+IO.puts("\nFinancial Ratios:")
+IO.puts("Current Ratio: #{Float.round(current_ratio, 2)}")
+IO.puts("Debt-to-Equity: #{Float.round(debt_to_equity, 2)}")
+```
+
+## Example 5: Handling Complex Tables
+
+Extract data from tables with footnotes and irregular formatting:
+
+```elixir
+defmodule ComplexTableExtractor do
+  @moduledoc """
+  Handle complex financial tables with footnotes and irregular formatting.
+  """
+
+  alias ExOutlines.{Spec, Spec.Schema}
+
+  def segment_reporting_schema do
+    segment_schema = Schema.new(%{
+      segment_name: %{type: :string, required: true},
+      revenue: %{type: :number, required: true},
+      operating_income: %{type: :number, required: true},
+      assets: %{type: :number, required: false}
+    })
+
+    Schema.new(%{
+      company_name: %{type: :string, required: true},
+      reporting_period: %{type: :string, required: true},
+      currency: %{type: :string, required: true, pattern: ~r/^[A-Z]{3}$/},
+      unit_scale: %{
+        type: {:enum, ["actual", "thousands", "millions", "billions"]},
+        required: true
+      },
+      segments: %{
+        type: {:array, %{type: {:object, segment_schema}}},
+        required: true,
+        min_items: 1,
+        description: "Business segment financial data"
+      },
+      reconciliation: %{
+        type: {:object, Schema.new(%{
+          total_segment_revenue: %{type: :number, required: true},
+          corporate_adjustments: %{type: :number, required: false},
+          consolidated_revenue: %{type: :number, required: true}
+        })},
+        required: false,
+        description: "Reconciliation to consolidated totals"
+      }
+    })
+  end
+
+  def extract_segments(report_text, opts \\ []) do
+    backend = Keyword.get(opts, :backend, ExOutlines.Backend.Anthropic)
+
+    messages = [
+      %{
+        role: "user",
+        content: """
+        Extract business segment data from this financial report. Include:
+        - All operating segments
+        - Revenue and operating income for each segment
+        - Reconciliation to consolidated totals if shown
+
+        Ignore footnote numbers and focus on the numerical data.
+
+        #{report_text}
+        """
+      }
+    ]
+
+    schema = segment_reporting_schema()
+
+    Spec.generate(schema,
+      backend: backend,
+      backend_opts: Keyword.get(opts, :backend_opts, []),
+      messages: messages
+    )
+  end
+end
+```
+
+## Production Integration Example
+
+Complete workflow for processing earnings reports in a Phoenix application:
+
+```elixir
+defmodule EarningsReportProcessor do
+  @moduledoc """
+  Production workflow for processing earnings reports.
+  """
+
+  require Logger
+
+  def process_earnings_report(file_path, company_id, user_id) do
+    Logger.info("Processing earnings report for company #{company_id}")
+
+    with {:ok, text} <- extract_text_from_pdf(file_path),
+         {:ok, report_type} <- classify_report(text),
+         {:ok, financial_data} <- extract_financial_data(text, report_type),
+         {:ok, validated_data} <- validate_and_enrich(financial_data),
+         {:ok, saved} <- save_to_database(validated_data, company_id, user_id) do
+
+      # Export to CSV for download
+      csv_path = generate_csv_export(validated_data)
+
+      {:ok, %{
+        financial_data: saved,
+        csv_export: csv_path,
+        report_type: report_type
+      }}
+    else
+      {:error, reason} = error ->
+        Logger.error("Failed to process earnings report: #{inspect(reason)}")
+        error
+    end
+  end
+
+  defp extract_text_from_pdf(file_path) do
+    # Use PDF text extraction library
+    # For example: {:ok, Pdf.extract_text(file_path)}
+    {:ok, "Sample extracted text"}
+  end
+
+  defp classify_report(text) do
+    # Determine if it's income statement, balance sheet, cash flow, or full report
+    cond do
+      String.contains?(text, ["STATEMENT OF INCOME", "INCOME STATEMENT"]) ->
+        {:ok, :income_statement}
+
+      String.contains?(text, ["BALANCE SHEET"]) ->
+        {:ok, :balance_sheet}
+
+      String.contains?(text, ["CASH FLOW"]) ->
+        {:ok, :cash_flow}
+
+      true ->
+        {:ok, :full_report}
+    end
+  end
+
+  defp extract_financial_data(text, :income_statement) do
+    IncomeStatementExtractor.extract_from_text(text,
+      backend: ExOutlines.Backend.Anthropic,
+      backend_opts: [
+        api_key: System.get_env("ANTHROPIC_API_KEY"),
+        model: "claude-3-5-sonnet-20241022",
+        max_tokens: 2048
+      ]
+    )
+  end
+
+  defp extract_financial_data(text, :balance_sheet) do
+    BalanceSheetExtractor.extract_balance_sheet(text)
+  end
+
+  defp extract_financial_data(_text, report_type) do
+    {:error, {:unsupported_report_type, report_type}}
+  end
+
+  defp validate_and_enrich(financial_data) do
+    # Additional validation and enrichment
+    # - Check for outliers
+    # - Compare to historical data
+    # - Calculate derived metrics
+    {:ok, financial_data}
+  end
+
+  defp save_to_database(data, company_id, user_id) do
+    # Save to your database
+    # YourApp.FinancialData.create(data, company_id, user_id)
+    {:ok, data}
+  end
+
+  defp generate_csv_export(data) do
+    file_path = Path.join(System.tmp_dir!(), "export_#{:os.system_time()}.csv")
+    FinancialDataExporter.export_to_file([data], file_path)
+    file_path
+  end
+end
+```
+
+## Error Handling Strategies
+
+Handle common extraction errors:
+
+```elixir
+defmodule FinancialDataValidator do
+  @moduledoc """
+  Validation and error handling for financial data extraction.
+  """
+
+  def validate_extracted_data(data, report_type) do
+    validators = [
+      &check_required_fields/1,
+      &check_numeric_ranges/1,
+      &check_relationships/1,
+      &check_fiscal_period/1
+    ]
+
+    errors = Enum.flat_map(validators, fn validator ->
+      case validator.(data) do
+        :ok -> []
+        {:error, msg} -> [msg]
+      end
+    end)
+
+    case errors do
+      [] -> {:ok, data}
+      issues -> {:error, {:validation_failed, issues}}
+    end
+  end
+
+  defp check_required_fields(data) do
+    required = [:company_name, :reporting_period, :currency]
+
+    missing = Enum.filter(required, fn field ->
+      is_nil(Map.get(data, field))
+    end)
+
+    case missing do
+      [] -> :ok
+      fields -> {:error, "Missing required fields: #{inspect(fields)}"}
+    end
+  end
+
+  defp check_numeric_ranges(data) do
+    # Check for unrealistic values
+    cond do
+      Map.has_key?(data, :revenue) and data.revenue < 0 ->
+        {:error, "Revenue cannot be negative"}
+
+      Map.has_key?(data, :total_assets) and data.total_assets < 0 ->
+        {:error, "Total assets cannot be negative"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp check_relationships(data) do
+    # Income statement checks
+    if Map.has_key?(data, :gross_profit) and Map.has_key?(data, :revenue) do
+      if data.gross_profit > data.revenue * 1.01 do
+        {:error, "Gross profit exceeds revenue"}
+      else
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp check_fiscal_period(data) do
+    if Map.has_key?(data, :fiscal_year) do
+      year = data.fiscal_year
+
+      if year < 2000 or year > 2100 do
+        {:error, "Fiscal year #{year} is outside reasonable range"}
+      else
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+end
+```
+
+## Performance Monitoring
+
+Track extraction performance and quality:
+
+```elixir
+defmodule ExtractionMetrics do
+  @moduledoc """
+  Monitor extraction quality and performance.
+  """
+
+  def track_extraction(company_id, report_type, result, duration_ms) do
+    metrics = %{
+      company_id: company_id,
+      report_type: report_type,
+      success: match?({:ok, _}, result),
+      duration_ms: duration_ms,
+      timestamp: DateTime.utc_now()
+    }
+
+    # Send to your metrics system (Telemetry, etc.)
+    :telemetry.execute(
+      [:ex_outlines, :earnings, :extraction],
+      %{duration: duration_ms},
+      metrics
+    )
+
+    case result do
+      {:ok, data} ->
+        track_data_quality(data)
+
+      {:error, reason} ->
+        track_error(reason)
+    end
+  end
+
+  defp track_data_quality(data) do
+    # Track completeness
+    total_fields = map_size(data)
+    populated_fields = Enum.count(data, fn {_k, v} -> not is_nil(v) end)
+    completeness = populated_fields / total_fields
+
+    :telemetry.execute(
+      [:ex_outlines, :earnings, :quality],
+      %{completeness: completeness},
+      %{total_fields: total_fields, populated: populated_fields}
+    )
+  end
+
+  defp track_error(reason) do
+    :telemetry.execute(
+      [:ex_outlines, :earnings, :error],
+      %{count: 1},
+      %{reason: reason}
+    )
+  end
+end
+```
+
+## Summary
+
+This notebook demonstrated extracting structured financial data from earnings reports using ExOutlines. Key takeaways:
+
+1. **Schema Design**: Create comprehensive schemas for financial statements
+2. **Validation**: Implement accounting equation checks and relationship validation
+3. **Multi-Period Analysis**: Extract and compare data across time periods
+4. **CSV Export**: Generate analysis-ready CSV files
+5. **Complex Tables**: Handle irregular formatting and footnotes
+6. **Error Handling**: Validate extracted data for accuracy
+7. **Production Integration**: Complete workflow for real applications
+8. **Quality Monitoring**: Track extraction performance and accuracy
+
+Financial document extraction requires careful attention to units, currencies, and accounting relationships. ExOutlines provides the structure and validation needed for reliable automation.
+
+Next steps:
+- Add support for international accounting standards (IFRS)
+- Implement trend analysis and forecasting
+- Create dashboards for visual financial analysis
+- Build alert systems for significant changes
+- Integrate with financial databases and APIs

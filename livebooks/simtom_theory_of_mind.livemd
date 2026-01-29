@@ -1,0 +1,647 @@
+# SimToM: Simulation Theory of Mind
+
+## Introduction
+
+This notebook demonstrates SimToM (Simulation Theory of Mind), a two-stage prompting framework that helps LLMs better understand scenarios where different characters have incomplete or different knowledge about events.
+
+**The Problem**: When asked "Where was the grapefruit?", an LLM might answer based on all events in the story, even if the character being asked didn't witness those events.
+
+**The Solution**: SimToM filters the story to only include events the specific character observed before answering the question.
+
+**Learning Objectives:**
+
+* Understand Theory of Mind in AI systems
+* Implement perspective-taking with LLMs
+* Use multi-stage reasoning pipelines
+* Filter information by character knowledge
+* Handle incomplete information scenarios
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Understanding Theory of Mind
+
+Theory of Mind is the ability to understand that others have beliefs, desires, and knowledge different from your own.
+
+**Example Scenario:**
+
+> Aria and Aiden are in a front yard.
+> There is a grapefruit in a green bucket.
+> Aria moves the grapefruit to a blue container.
+> Aiden leaves the front yard.
+> Aria moves the grapefruit to a red box.
+
+**Question**: Where does Aiden think the grapefruit is?
+
+**Wrong Answer** (without perspective-taking): "Red box" (considers all events)
+
+**Correct Answer** (with perspective-taking): "Blue container" (Aiden left before the second move)
+
+## SimToM Workflow
+
+```mermaid
+graph TD
+    A[Story + Character + Question] --> B[Stage 1: Perspective Filter]
+    B --> C[Extract Events Known to Character]
+    C --> D[Filtered Story from Character's POV]
+    D --> E[Stage 2: Answer Question]
+    E --> F[Final Answer Based on Character's Knowledge]
+
+    style A fill:#e1f5ff
+    style D fill:#fff4e1
+    style F fill:#e8f5e9
+```
+
+## Stage 1: Perspective Extraction Schema
+
+Extract only the events a character would know about.
+
+```elixir
+# Schema for Stage 1: Extract character's perspective
+perspective_schema =
+  Schema.new(%{
+    character: %{
+      type: :string,
+      required: true,
+      description: "Name of the character whose perspective we're taking"
+    },
+    known_events: %{
+      type: {:array, %{type: :string, min_length: 10, max_length: 300}},
+      required: true,
+      min_items: 1,
+      max_items: 20,
+      description: "Events that the character directly observed or experienced"
+    },
+    inferred_knowledge: %{
+      type: {:array, %{type: :string, max_length: 200}},
+      required: false,
+      description: "Knowledge the character could reasonably infer from what they observed"
+    },
+    unknown_events: %{
+      type: {:array, %{type: :string, max_length: 300}},
+      required: false,
+      description: "Events the character did NOT witness or know about"
+    }
+  })
+
+IO.puts("Stage 1 schema defined: Extract character perspective")
+:ok
+```
+
+## Stage 2: Answer Question Schema
+
+Answer the question based on the character's limited knowledge.
+
+```elixir
+# Schema for Stage 2: Answer based on character's knowledge
+answer_schema =
+  Schema.new(%{
+    character_perspective: %{
+      type: :string,
+      required: true,
+      min_length: 20,
+      max_length: 500,
+      description: "Summary of what the character knows from their perspective"
+    },
+    reasoning: %{
+      type: :string,
+      required: true,
+      min_length: 30,
+      max_length: 500,
+      description: "Step-by-step reasoning based only on character's knowledge"
+    },
+    answer: %{
+      type: :string,
+      required: true,
+      min_length: 1,
+      max_length: 200,
+      description: "The answer to the question from the character's perspective"
+    },
+    confidence: %{
+      type: {:enum, ["high", "medium", "low"]},
+      required: true,
+      description: "Confidence in the answer based on available information"
+    }
+  })
+
+IO.puts("Stage 2 schema defined: Answer question from perspective")
+:ok
+```
+
+## Example 1: The Grapefruit Scenario
+
+Let's work through the classic Theory of Mind scenario.
+
+```elixir
+story_1 = """
+Aria and Aiden are in a front yard.
+There is a grapefruit in a green bucket.
+Aria moves the grapefruit to a blue container.
+Aiden leaves the front yard.
+Aria moves the grapefruit to a red box.
+"""
+
+question_1 = "Where does Aiden think the grapefruit is?"
+character_1 = "Aiden"
+
+IO.puts("Story:")
+IO.puts(story_1)
+IO.puts("\nCharacter: #{character_1}")
+IO.puts("Question: #{question_1}")
+```
+
+### Stage 1: Extract Aiden's Perspective
+
+```elixir
+stage1_prompt = """
+Read this story and identify what events the character "#{character_1}" directly observed:
+
+#{story_1}
+
+Extract:
+1. Events #{character_1} witnessed or participated in
+2. What #{character_1} could reasonably infer
+3. Events #{character_1} did NOT observe (happened after they left or when they weren't present)
+
+Be very careful about the temporal sequence. If a character leaves a location, they don't observe subsequent events there.
+"""
+
+# In production:
+# {:ok, perspective} = ExOutlines.generate(perspective_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "Extract character perspective carefully considering what they could observe."},
+#       %{role: "user", content: stage1_prompt}
+#     ]
+#   ]
+# )
+
+# Expected perspective extraction
+expected_perspective = %{
+  "character" => "Aiden",
+  "known_events" => [
+    "Aiden and Aria are in a front yard together",
+    "There is a grapefruit in a green bucket",
+    "Aria moves the grapefruit to a blue container (Aiden witnesses this)",
+    "Aiden leaves the front yard"
+  ],
+  "inferred_knowledge" => [
+    "The grapefruit was moved from the green bucket to the blue container while Aiden was present"
+  ],
+  "unknown_events" => [
+    "Aria moves the grapefruit to a red box (happened AFTER Aiden left)"
+  ]
+}
+
+IO.puts("\n=== Stage 1: Aiden's Perspective ===")
+IO.puts("\nKnown events:")
+
+Enum.each(expected_perspective["known_events"], fn event ->
+  IO.puts("  - #{event}")
+end)
+
+IO.puts("\nUnknown events (happened after Aiden left):")
+
+Enum.each(expected_perspective["unknown_events"], fn event ->
+  IO.puts("  - #{event}")
+end)
+
+:ok
+```
+
+### Stage 2: Answer Question from Aiden's Perspective
+
+```elixir
+# Build Stage 2 prompt using extracted perspective
+known_events_text =
+  expected_perspective["known_events"]
+  |> Enum.join("\n")
+
+stage2_prompt = """
+Based on this character's knowledge and observations:
+
+Character: #{expected_perspective["character"]}
+
+What the character observed:
+#{known_events_text}
+
+Question: #{question_1}
+
+Answer the question based ONLY on what #{expected_perspective["character"]} observed.
+Do NOT use information about events that happened after the character left.
+
+Provide your reasoning and final answer.
+"""
+
+# In production:
+# {:ok, answer_result} = ExOutlines.generate(answer_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "Answer questions from the character's limited perspective."},
+#       %{role: "user", content: stage2_prompt}
+#     ]
+#   ]
+# )
+
+expected_answer = %{
+  "character_perspective" =>
+    "Aiden was present in the front yard and saw the grapefruit in the green bucket. He then witnessed Aria move it to the blue container. After that, Aiden left the front yard. He did not observe any subsequent events.",
+  "reasoning" =>
+    "The last thing Aiden saw was Aria moving the grapefruit from the green bucket to the blue container. Since Aiden left the front yard immediately after, he has no knowledge of Aria's later action of moving the grapefruit to the red box. Therefore, from Aiden's perspective, the grapefruit is still in the blue container where he last saw it.",
+  "answer" => "Blue container",
+  "confidence" => "high"
+}
+
+IO.puts("\n=== Stage 2: Answer from Aiden's Perspective ===")
+IO.puts("\nReasoning:")
+IO.puts(expected_answer["reasoning"])
+IO.puts("\nAnswer: #{expected_answer["answer"]}")
+IO.puts("Confidence: #{expected_answer["confidence"]}")
+
+# Validate answer
+case Spec.validate(answer_schema, expected_answer) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Valid answer from character's perspective")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## SimToM Process Visualization
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S1 as Stage 1: Filter
+    participant S2 as Stage 2: Answer
+
+    U->>S1: Story + Character + Question
+    Note over S1: Extract events<br/>character observed
+    S1->>S1: Filter by presence
+    S1->>S1: Mark unknown events
+    S1-->>S2: Character's known events
+
+    Note over S2: Answer question using<br/>only known events
+    S2->>S2: Reason from perspective
+    S2->>S2: Generate answer
+    S2-->>U: Answer based on<br/>character's knowledge
+```
+
+## Example 2: Hidden Object Scenario
+
+Another Theory of Mind test with multiple characters.
+
+```elixir
+story_2 = """
+Emma, Liam, and Sophia are in a kitchen.
+There is a cookie jar on the counter with 5 cookies inside.
+Emma takes 2 cookies from the jar.
+Liam leaves to answer a phone call.
+Sophia takes 1 cookie from the jar.
+Emma puts her 2 cookies back in the jar.
+Sophia leaves for a meeting.
+Liam returns to the kitchen.
+"""
+
+question_2a = "How many cookies does Liam think are in the jar?"
+question_2b = "How many cookies does Sophia think are in the jar?"
+
+IO.puts("Story:")
+IO.puts(story_2)
+IO.puts("\nQuestion A: #{question_2a}")
+IO.puts("Question B: #{question_2b}")
+```
+
+### Liam's Perspective
+
+```elixir
+liam_perspective = %{
+  "character" => "Liam",
+  "known_events" => [
+    "Started with 5 cookies in the jar",
+    "Emma takes 2 cookies (Liam witnessed this)",
+    "Liam leaves to answer a phone call",
+    "Liam returns to the kitchen"
+  ],
+  "inferred_knowledge" => [
+    "When Liam left, there were 3 cookies in the jar (5 minus Emma's 2)"
+  ],
+  "unknown_events" => [
+    "Sophia takes 1 cookie (happened while Liam was away)",
+    "Emma puts her 2 cookies back (happened while Liam was away)"
+  ]
+}
+
+liam_answer = %{
+  "character_perspective" =>
+    "Liam saw Emma take 2 cookies from a jar that had 5 cookies. He then left to answer a phone call. When he returns, he has not observed any other changes to the cookie jar.",
+  "reasoning" =>
+    "Liam's last observation was Emma taking 2 cookies, leaving 3 cookies in the jar (5 - 2 = 3). He left immediately after and did not witness Sophia taking a cookie or Emma returning her cookies. From Liam's perspective, 3 cookies should still be in the jar.",
+  "answer" => "3 cookies",
+  "confidence" => "high"
+}
+
+IO.puts("\n=== Liam's Answer ===")
+IO.puts("Known events: #{length(liam_perspective["known_events"])}")
+IO.puts("Unknown events: #{length(liam_perspective["unknown_events"])}")
+IO.puts("\nAnswer: #{liam_answer["answer"]}")
+IO.puts("Reasoning: #{liam_answer["reasoning"]}")
+```
+
+### Sophia's Perspective
+
+```elixir
+sophia_perspective = %{
+  "character" => "Sophia",
+  "known_events" => [
+    "Started with 5 cookies in the jar",
+    "Emma takes 2 cookies",
+    "Liam leaves to answer a phone call",
+    "Sophia takes 1 cookie from the jar",
+    "Emma puts her 2 cookies back in the jar (Sophia witnessed this)",
+    "Sophia leaves for a meeting"
+  ],
+  "inferred_knowledge" => [
+    "After Emma's initial removal and Sophia's removal, there were 2 cookies (5 - 2 - 1)",
+    "After Emma returned her cookies, there were 4 cookies (2 + 2)"
+  ],
+  "unknown_events" => [
+    "Liam returns to the kitchen (happened after Sophia left)"
+  ]
+}
+
+sophia_answer = %{
+  "character_perspective" =>
+    "Sophia observed Emma take 2 cookies, then took 1 cookie herself, leaving 2 cookies. She then witnessed Emma put her 2 cookies back, bringing the total to 4 cookies. After this, Sophia left for a meeting.",
+  "reasoning" =>
+    "From Sophia's perspective: Started with 5, Emma took 2 (leaving 3), Sophia took 1 (leaving 2), Emma returned 2 (making 4). The last state Sophia observed was 4 cookies in the jar before she left.",
+  "answer" => "4 cookies",
+  "confidence" => "high"
+}
+
+IO.puts("\n=== Sophia's Answer ===")
+IO.puts("Known events: #{length(sophia_perspective["known_events"])}")
+IO.puts("Unknown events: #{length(sophia_perspective["unknown_events"])}")
+IO.puts("\nAnswer: #{sophia_answer["answer"]}")
+IO.puts("Reasoning: #{sophia_answer["reasoning"]}")
+```
+
+### Actual State vs. Character Beliefs
+
+```mermaid
+graph LR
+    A[Initial: 5 cookies] --> B[Emma takes 2<br/>Remaining: 3]
+    B --> C[Liam leaves<br/>His belief: 3 cookies]
+    B --> D[Sophia takes 1<br/>Remaining: 2]
+    D --> E[Emma returns 2<br/>Remaining: 4]
+    E --> F[Sophia leaves<br/>Her belief: 4 cookies]
+    E --> G[Liam returns<br/>Actual: 4 cookies<br/>His belief: 3 cookies]
+
+    style C fill:#ffe1e1
+    style F fill:#ffe1e1
+    style G fill:#e8f5e9
+```
+
+## Comparison: With vs. Without SimToM
+
+```elixir
+defmodule SimToMComparison do
+  def compare_approaches(story, character, question) do
+    %{
+      without_simtom: """
+      Without SimToM (naive approach):
+      - Model considers ALL events in the story
+      - Answers based on complete information
+      - Does not account for character's limited perspective
+      - Higher error rate on Theory of Mind tasks
+      """,
+      with_simtom: """
+      With SimToM (perspective-aware):
+      - Stage 1: Filters events by what character observed
+      - Explicitly tracks unknown events
+      - Stage 2: Answers using only character's knowledge
+      - Significantly better on Theory of Mind benchmarks
+      """,
+      performance_gain: """
+      Research Results (ToMI and BigToM benchmarks):
+      - SimToM > Chain of Thought
+      - SimToM > Zero-shot prompting
+      - Key improvement: Separating perspective extraction from answering
+      """
+    }
+  end
+end
+
+comparison = SimToMComparison.compare_approaches(story_1, character_1, question_1)
+
+IO.puts("\n=== Approach Comparison ===")
+IO.puts("\n#{comparison.without_simtom}")
+IO.puts("\n#{comparison.with_simtom}")
+IO.puts("\n#{comparison.performance_gain}")
+```
+
+## Production Implementation
+
+```elixir
+defmodule SimToMPipeline do
+  @moduledoc """
+  Production SimToM implementation with error handling.
+  """
+
+  alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+  def run(story, character, question, api_key, model \\ "gpt-4o-mini") do
+    with {:ok, perspective} <- stage1_extract_perspective(story, character, api_key, model),
+         {:ok, answer} <-
+           stage2_answer_question(perspective, question, character, api_key, model) do
+      {:ok,
+       %{
+         perspective: perspective,
+         answer: answer,
+         character: character,
+         question: question
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp stage1_extract_perspective(story, character, api_key, model) do
+    schema = perspective_schema()
+
+    prompt = """
+    Extract what #{character} observed in this story:
+
+    #{story}
+
+    Be careful about temporal order. If #{character} leaves, they don't observe subsequent events.
+    """
+
+    ExOutlines.generate(schema,
+      backend: HTTP,
+      backend_opts: [
+        api_key: api_key,
+        model: model,
+        messages: [
+          %{role: "system", content: "Extract character perspective carefully."},
+          %{role: "user", content: prompt}
+        ]
+      ]
+    )
+  end
+
+  defp stage2_answer_question(perspective, question, character, api_key, model) do
+    schema = answer_schema()
+
+    known_events = Enum.join(perspective.known_events, "\n")
+
+    prompt = """
+    Character: #{character}
+
+    What #{character} observed:
+    #{known_events}
+
+    Question: #{question}
+
+    Answer based ONLY on what #{character} observed. Explain your reasoning.
+    """
+
+    ExOutlines.generate(schema,
+      backend: HTTP,
+      backend_opts: [
+        api_key: api_key,
+        model: model,
+        messages: [
+          %{role: "system", content: "Answer from character's limited perspective."},
+          %{role: "user", content: prompt}
+        ]
+      ]
+    )
+  end
+
+  defp perspective_schema do
+    # Schema definition
+  end
+
+  defp answer_schema do
+    # Schema definition
+  end
+end
+
+# Usage example (commented):
+# {:ok, result} = SimToMPipeline.run(story_1, "Aiden", question_1, api_key)
+# IO.inspect(result.answer)
+```
+
+## Key Takeaways
+
+**SimToM Pattern:**
+
+* Stage 1: Extract character's observations
+* Stage 2: Answer using only those observations
+* Outperforms single-stage approaches on Theory of Mind tasks
+
+**When to Use:**
+
+* Multiple characters with different knowledge
+* Temporal sequences where information becomes available at different times
+* Scenarios requiring perspective-taking
+* Questions about beliefs, not facts
+
+**Schema Design:**
+
+* Separate schemas for extraction vs. answering
+* Track both known and unknown events
+* Include confidence levels
+* Provide reasoning transparency
+
+**Production Tips:**
+
+* Handle extraction failures gracefully
+* Validate temporal consistency
+* Consider character movement carefully
+* Test with edge cases (simultaneous events, indirect knowledge)
+
+## Real-World Applications
+
+**Customer Support:**
+- Different agents have different context
+- Track what each agent told the customer
+- Avoid repeating information
+
+**Game NPCs:**
+- Characters have limited world knowledge
+- React based on what they've experienced
+- Create realistic dialogue
+
+**Collaborative Systems:**
+- Team members have different information
+- Track who knows what
+- Coordinate based on shared knowledge
+
+**Educational Tools:**
+- Teach perspective-taking
+* Theory of Mind assessment
+- Social skills training
+
+## Challenges
+
+Try these exercises:
+
+1. Add support for indirect knowledge (heard from others)
+2. Handle simultaneous events (what if two people act at once?)
+3. Implement knowledge transfer (character A tells character B)
+4. Add uncertainty levels (character saw something but isn't sure)
+5. Multi-turn conversations with evolving knowledge
+
+## Next Steps
+
+* Try the **Chain of Thought** notebook for step-by-step reasoning
+* Explore the **ReAct Agent** notebook for action-based reasoning
+* Read the **Schema Patterns** guide for multi-stage pipelines
+* Check the **Error Handling** guide for robust implementations
+
+## Further Reading
+
+* [SimToM Paper](https://arxiv.org/abs/2311.10227)
+* [Theory of Mind in AI](https://en.wikipedia.org/wiki/Theory_of_mind)
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)

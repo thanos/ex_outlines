@@ -1,0 +1,670 @@
+# Chain of Thought Reasoning
+
+## Introduction
+
+Chain of Thought (CoT) prompting improves LLM reasoning by generating intermediate steps before reaching a conclusion. Instead of jumping directly to an answer, the model breaks down complex problems into logical steps.
+
+**Research Foundation**: Based on the paper "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models" (Wei et al., 2022).
+
+**Learning Objectives:**
+
+* Understand Chain of Thought reasoning
+* Structure multi-step reasoning with schemas
+* Generate explicit reasoning traces
+* Improve accuracy on complex problems
+* Debug reasoning failures
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Understanding Chain of Thought
+
+**Without CoT** (direct answer):
+> Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
+>
+> A: 11
+
+**With CoT** (step-by-step reasoning):
+> Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
+>
+> A: Roger started with 5 balls. 2 cans with 3 balls each is 2 × 3 = 6 balls. Adding those to the original 5: 5 + 6 = 11 balls. **Answer: 11**
+
+The explicit reasoning steps help catch errors and make the process verifiable.
+
+## Reasoning Schema
+
+Define a schema that captures both reasoning steps and the final answer.
+
+```elixir
+# Schema for a single reasoning step
+reasoning_step_schema =
+  Schema.new(%{
+    step_number: %{
+      type: :integer,
+      required: true,
+      min: 1,
+      description: "Sequential step number"
+    },
+    description: %{
+      type: :string,
+      required: true,
+      min_length: 10,
+      max_length: 300,
+      description: "Description of this reasoning step"
+    },
+    calculation: %{
+      type: {:union, [%{type: :string}, %{type: :null}]},
+      required: false,
+      description: "Any mathematical calculation performed in this step"
+    }
+  })
+
+# Complete reasoning schema
+chain_of_thought_schema =
+  Schema.new(%{
+    problem: %{
+      type: :string,
+      required: true,
+      description: "Restatement of the problem being solved"
+    },
+    reasoning_steps: %{
+      type: {:array, %{type: {:object, reasoning_step_schema}}},
+      required: true,
+      min_items: 1,
+      max_items: 10,
+      description: "Sequential reasoning steps leading to the conclusion"
+    },
+    conclusion: %{
+      type: :string,
+      required: true,
+      min_length: 5,
+      max_length: 500,
+      description: "Final answer or conclusion based on the reasoning"
+    },
+    confidence: %{
+      type: {:enum, ["high", "medium", "low"]},
+      required: true,
+      description: "Confidence in the reasoning and conclusion"
+    }
+  })
+
+IO.puts("Chain of Thought schema defined")
+:ok
+```
+
+## Example 1: Mathematical Reasoning
+
+Let's solve a math problem with explicit reasoning steps.
+
+```elixir
+math_problem = """
+A cafeteria had 23 apples. If they used 20 to make lunch and bought 6 more,
+how many apples do they have?
+"""
+
+# In production:
+# {:ok, result} = ExOutlines.generate(chain_of_thought_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "Solve problems using step-by-step reasoning."},
+#       %{role: "user", content: "Problem: #{math_problem}\n\nProvide step-by-step reasoning."}
+#     ]
+#   ]
+# )
+
+# Expected reasoning
+expected_math_reasoning = %{
+  "problem" => "Calculate how many apples the cafeteria has after using some and buying more",
+  "reasoning_steps" => [
+    %{
+      "step_number" => 1,
+      "description" => "Start with the initial quantity of apples",
+      "calculation" => "Initial apples = 23"
+    },
+    %{
+      "step_number" => 2,
+      "description" => "Subtract the apples used for lunch",
+      "calculation" => "23 - 20 = 3"
+    },
+    %{
+      "step_number" => 3,
+      "description" => "Add the newly purchased apples",
+      "calculation" => "3 + 6 = 9"
+    }
+  ],
+  "conclusion" => "The cafeteria now has 9 apples",
+  "confidence" => "high"
+}
+
+IO.puts("Problem:")
+IO.puts(math_problem)
+IO.puts("\n=== Chain of Thought Reasoning ===")
+
+Enum.each(expected_math_reasoning["reasoning_steps"], fn step ->
+  IO.puts("\nStep #{step["step_number"]}: #{step["description"]}")
+  if step["calculation"], do: IO.puts("  Calculation: #{step["calculation"]}")
+end)
+
+IO.puts("\nConclusion: #{expected_math_reasoning["conclusion"]}")
+IO.puts("Confidence: #{expected_math_reasoning["confidence"]}")
+
+# Validate
+case Spec.validate(chain_of_thought_schema, expected_math_reasoning) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Valid reasoning chain")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Example 2: Logical Reasoning
+
+Chain of thought helps with logical puzzles and deduction.
+
+```elixir
+logic_problem = """
+All roses are flowers. All flowers need water. Does a rose need water?
+"""
+
+expected_logic_reasoning = %{
+  "problem" => "Determine if a rose needs water based on given premises",
+  "reasoning_steps" => [
+    %{
+      "step_number" => 1,
+      "description" => "Identify the first premise: All roses are flowers",
+      "calculation" => nil
+    },
+    %{
+      "step_number" => 2,
+      "description" => "Identify the second premise: All flowers need water",
+      "calculation" => nil
+    },
+    %{
+      "step_number" => 3,
+      "description" =>
+        "Apply transitive property: If A is B, and B needs C, then A needs C",
+      "calculation" => nil
+    },
+    %{
+      "step_number" => 4,
+      "description" =>
+        "Substitute: Rose is a flower, and flowers need water, therefore rose needs water",
+      "calculation" => nil
+    }
+  ],
+  "conclusion" => "Yes, a rose needs water (by logical deduction through the transitive property)",
+  "confidence" => "high"
+}
+
+IO.puts("\n\nProblem:")
+IO.puts(logic_problem)
+IO.puts("\n=== Logical Reasoning Chain ===")
+
+Enum.each(expected_logic_reasoning["reasoning_steps"], fn step ->
+  IO.puts("\nStep #{step["step_number"]}: #{step["description"]}")
+end)
+
+IO.puts("\nConclusion: #{expected_logic_reasoning["conclusion"]}")
+```
+
+## Example 3: Comparison Task
+
+A classic CoT example: comparing numbers with counterintuitive results.
+
+```elixir
+comparison_problem = """
+Which is bigger: 9.11 or 9.9?
+"""
+
+# This is where CoT helps catch mistakes!
+
+# WRONG reasoning (common error):
+wrong_reasoning = %{
+  "problem" => "Compare 9.11 and 9.9",
+  "reasoning_steps" => [
+    %{
+      "step_number" => 1,
+      "description" => "Look at the numbers after the decimal point",
+      "calculation" => "9.11 has 11, 9.9 has 9"
+    },
+    %{
+      "step_number" => 2,
+      "description" => "Compare 11 and 9",
+      "calculation" => "11 > 9"
+    }
+  ],
+  "conclusion" => "9.11 is bigger (WRONG!)",
+  "confidence" => "medium"
+}
+
+# CORRECT reasoning:
+correct_reasoning = %{
+  "problem" => "Compare 9.11 and 9.9 as decimal numbers",
+  "reasoning_steps" => [
+    %{
+      "step_number" => 1,
+      "description" => "Align decimal places for comparison",
+      "calculation" => "9.11 = 9.11, 9.9 = 9.90"
+    },
+    %{
+      "step_number" => 2,
+      "description" => "Compare the integer parts",
+      "calculation" => "Both have 9 before the decimal - equal so far"
+    },
+    %{
+      "step_number" => 3,
+      "description" => "Compare the first decimal place",
+      "calculation" => "0.1 (from 9.11) vs 0.9 (from 9.90)"
+    },
+    %{
+      "step_number" => 4,
+      "description" => "Determine which first decimal place is larger",
+      "calculation" => "0.9 > 0.1, therefore 9.90 > 9.11"
+    }
+  ],
+  "conclusion" => "9.9 is bigger than 9.11",
+  "confidence" => "high"
+}
+
+IO.puts("\n\nProblem:")
+IO.puts(comparison_problem)
+
+IO.puts("\n=== WRONG Reasoning (Common Error) ===")
+
+Enum.each(wrong_reasoning["reasoning_steps"], fn step ->
+  IO.puts("\nStep #{step["step_number"]}: #{step["description"]}")
+  if step["calculation"], do: IO.puts("  #{step["calculation"]}")
+end)
+
+IO.puts("\nWrong Conclusion: #{wrong_reasoning["conclusion"]}")
+
+IO.puts("\n\n=== CORRECT Reasoning ===")
+
+Enum.each(correct_reasoning["reasoning_steps"], fn step ->
+  IO.puts("\nStep #{step["step_number"]}: #{step["description"]}")
+  if step["calculation"], do: IO.puts("  #{step["calculation"]}")
+end)
+
+IO.puts("\nCorrect Conclusion: #{correct_reasoning["conclusion"]}")
+
+IO.puts("""
+
+Note: The explicit reasoning steps help catch the error in the wrong approach.
+Without CoT, models might jump to "11 > 9, so 9.11 is bigger" - a common mistake!
+""")
+```
+
+## Reasoning Quality Analysis
+
+Evaluate the quality of reasoning chains.
+
+```elixir
+defmodule ReasoningAnalyzer do
+  @doc """
+  Analyze a reasoning chain for quality metrics.
+  """
+  def analyze(reasoning) do
+    steps = reasoning["reasoning_steps"]
+
+    %{
+      step_count: length(steps),
+      avg_step_length: avg_description_length(steps),
+      has_calculations: has_calculations?(steps),
+      logical_flow: check_logical_flow(steps),
+      confidence: reasoning["confidence"]
+    }
+  end
+
+  defp avg_description_length(steps) do
+    total = Enum.reduce(steps, 0, fn step, acc -> acc + String.length(step["description"]) end)
+    Float.round(total / length(steps), 1)
+  end
+
+  defp has_calculations?(steps) do
+    Enum.any?(steps, fn step -> step["calculation"] != nil end)
+  end
+
+  defp check_logical_flow(steps) do
+    # Check if step numbers are sequential
+    numbers = Enum.map(steps, fn step -> step["step_number"] end)
+    expected = Enum.to_list(1..length(steps))
+    numbers == expected
+  end
+
+  @doc """
+  Generate quality report.
+  """
+  def report(reasoning) do
+    analysis = analyze(reasoning)
+
+    IO.puts("\n=== Reasoning Quality Report ===")
+    IO.puts("Number of steps: #{analysis.step_count}")
+    IO.puts("Average step length: #{analysis.avg_step_length} characters")
+    IO.puts("Contains calculations: #{analysis.has_calculations}")
+    IO.puts("Logical flow: #{if analysis.logical_flow, do: "Sequential", else: "Broken"}")
+    IO.puts("Confidence: #{analysis.confidence}")
+
+    quality_score = calculate_score(analysis)
+    IO.puts("\nQuality score: #{quality_score}/10")
+
+    if quality_score >= 7 do
+      IO.puts("Assessment: Good reasoning quality")
+    else
+      if quality_score >= 5 do
+        IO.puts("Assessment: Acceptable but could be improved")
+      else
+        IO.puts("Assessment: Poor reasoning quality")
+      end
+    end
+
+    analysis
+  end
+
+  defp calculate_score(analysis) do
+    base = min(analysis.step_count, 5) * 1.5
+    calc_bonus = if analysis.has_calculations, do: 1.5, else: 0
+    flow_bonus = if analysis.logical_flow, do: 1.5, else: 0
+    conf_bonus = case analysis.confidence do
+      "high" -> 1.5
+      "medium" -> 0.75
+      _ -> 0
+    end
+
+    Float.round(base + calc_bonus + flow_bonus + conf_bonus, 1)
+  end
+end
+
+# Analyze the correct reasoning
+ReasoningAnalyzer.report(correct_reasoning)
+```
+
+## Multi-Problem Batch Processing
+
+Process multiple problems with CoT reasoning concurrently.
+
+```elixir
+defmodule ChainOfThoughtBatch do
+  def process_problems(problems, api_key, model) do
+    # In production:
+    # tasks = Enum.map(problems, fn problem ->
+    #   {chain_of_thought_schema, [
+    #     backend: HTTP,
+    #     backend_opts: [
+    #       api_key: api_key,
+    #       model: model,
+    #       messages: [
+    #         %{role: "system", content: "Solve problems with step-by-step reasoning."},
+    #         %{role: "user", content: "Problem: #{problem}\n\nProvide reasoning steps."}
+    #       ]
+    #     ]
+    #   ]}
+    # end)
+    #
+    # ExOutlines.generate_batch(tasks, max_concurrency: 5)
+
+    IO.puts("Would process #{length(problems)} problems concurrently")
+    IO.puts("Each with full Chain of Thought reasoning")
+  end
+end
+
+# Example problems batch
+problems = [
+  "If a train travels 60 miles in 1 hour, how far does it travel in 2.5 hours?",
+  "A recipe calls for 2 cups of flour for 12 cookies. How much flour for 30 cookies?",
+  "John is 5 years older than Mary. Mary is 3 years older than Bob. If Bob is 10, how old is John?"
+]
+
+ChainOfThoughtBatch.process_problems(problems, api_key, model)
+```
+
+## Few-Shot Chain of Thought
+
+Improve reasoning by providing example reasoning chains.
+
+```elixir
+defmodule FewShotCoT do
+  @doc """
+  Build few-shot prompt with reasoning examples.
+  """
+  def build_prompt(problem, examples \\ []) do
+    examples_text =
+      if length(examples) > 0 do
+        examples
+        |> Enum.map(&format_example/1)
+        |> Enum.join("\n\n")
+      else
+        ""
+      end
+
+    """
+    #{if examples_text != "", do: "Here are examples of step-by-step reasoning:\n\n#{examples_text}\n\n"}Now solve this problem with the same reasoning approach:
+
+    Problem: #{problem}
+
+    Provide step-by-step reasoning leading to your conclusion.
+    """
+  end
+
+  defp format_example(example) do
+    steps =
+      example.steps
+      |> Enum.with_index(1)
+      |> Enum.map(fn {step, idx} -> "Step #{idx}: #{step}" end)
+      |> Enum.join("\n")
+
+    """
+    Problem: #{example.problem}
+    #{steps}
+    Conclusion: #{example.conclusion}
+    """
+  end
+end
+
+# Define few-shot examples
+examples = [
+  %{
+    problem: "A store has 15 shirts. They sell 7. How many remain?",
+    steps: [
+      "Start with initial quantity: 15 shirts",
+      "Subtract shirts sold: 15 - 7 = 8",
+      "The remainder is what's left in the store"
+    ],
+    conclusion: "8 shirts remain"
+  },
+  %{
+    problem: "If 3 apples cost $2, how much do 9 apples cost?",
+    steps: [
+      "Find the price per apple: $2 ÷ 3 = $0.67 per apple",
+      "Multiply by the number of apples: $0.67 × 9 = $6",
+      "Alternatively: 9 apples is 3 times 3 apples, so 3 × $2 = $6"
+    ],
+    conclusion: "$6 for 9 apples"
+  }
+]
+
+new_problem = "A bakery makes 48 cupcakes. If each box holds 6 cupcakes, how many boxes are needed?"
+
+prompt = FewShotCoT.build_prompt(new_problem, examples)
+
+IO.puts("=== Few-Shot CoT Prompt ===")
+IO.puts(prompt)
+```
+
+## When Chain of Thought Helps Most
+
+```elixir
+defmodule CoTBenefits do
+  def analyze_problem_type(problem_text) do
+    characteristics = %{
+      multi_step: String.contains?(problem_text, ["then", "after", "next", "finally"]),
+      calculation: Regex.match?(~r/\d+/, problem_text),
+      logical: String.contains?(problem_text, ["all", "some", "if", "therefore"]),
+      comparison: String.contains?(problem_text, ["bigger", "smaller", "more", "less", "than"]),
+      sequential: String.contains?(problem_text, ["first", "second", "before", "after"])
+    }
+
+    benefits =
+      characteristics
+      |> Enum.filter(fn {_k, v} -> v end)
+      |> Enum.map(fn {k, _v} -> k end)
+
+    if length(benefits) > 0 do
+      IO.puts("This problem would benefit from Chain of Thought because it involves:")
+
+      Enum.each(benefits, fn benefit ->
+        IO.puts("  - #{benefit_description(benefit)}")
+      end)
+    else
+      IO.puts("This problem might not need Chain of Thought (simple direct answer)")
+    end
+
+    characteristics
+  end
+
+  defp benefit_description(:multi_step), do: "Multiple sequential steps"
+  defp benefit_description(:calculation), do: "Mathematical calculations"
+  defp benefit_description(:logical), do: "Logical deduction"
+  defp benefit_description(:comparison), do: "Comparison or evaluation"
+  defp benefit_description(:sequential), do: "Sequential reasoning"
+end
+
+# Test with different problems
+IO.puts("\n=== Problem Type Analysis ===\n")
+
+IO.puts("Problem 1: \"Which is bigger: 9.11 or 9.9?\"")
+CoTBenefits.analyze_problem_type("Which is bigger: 9.11 or 9.9?")
+
+IO.puts("\n\nProblem 2: \"What is the capital of France?\"")
+CoTBenefits.analyze_problem_type("What is the capital of France?")
+
+IO.puts(
+  "\n\nProblem 3: \"First add 5 and 3, then multiply by 2, finally subtract 4. What's the result?\""
+)
+
+CoTBenefits.analyze_problem_type(
+  "First add 5 and 3, then multiply by 2, finally subtract 4. What's the result?"
+)
+```
+
+## Key Takeaways
+
+**When to Use Chain of Thought:**
+
+* Multi-step problems
+* Mathematical reasoning
+* Logical deduction
+* Comparison tasks
+* Any problem where intermediate steps matter
+
+**Benefits:**
+
+* Improved accuracy on complex tasks
+* Verifiable reasoning process
+* Easier to debug errors
+* Better handling of tricky problems
+* Transparency in decision-making
+
+**Schema Design:**
+
+* Capture step-by-step reasoning
+* Number steps sequentially
+* Include calculations when relevant
+* Require conclusion separate from steps
+* Add confidence assessment
+
+**Production Tips:**
+
+* Use few-shot examples for better results
+* Analyze reasoning quality
+* Catch common errors (like 9.11 vs 9.9)
+* Process multiple problems in batch
+* Monitor step count (too few = hasty, too many = verbose)
+
+**Common Pitfalls:**
+
+* Jumping to conclusions without steps
+* Inconsistent step numbering
+* Missing critical intermediate calculations
+* Conflating correlation with causation
+* Circular reasoning
+
+## Real-World Applications
+
+**Education:**
+- Math tutoring systems
+- Step-by-step problem solving
+- Homework help with explanations
+
+**Finance:**
+- Investment analysis
+- Budget calculations
+- Risk assessment
+
+**Healthcare:**
+- Diagnostic reasoning
+- Treatment planning
+- Symptom analysis
+
+**Customer Support:**
+- Troubleshooting guides
+- Problem diagnosis
+- Solution derivation
+
+## Challenges
+
+Try these exercises:
+
+1. Add validation for mathematical calculations (check if they're correct)
+2. Implement reasoning step visualization
+3. Compare CoT vs. non-CoT accuracy on a test set
+4. Build a reasoning step suggestion system
+5. Create domain-specific reasoning templates
+
+## Next Steps
+
+* Try the **ReAct Agent** notebook for reasoning + action cycles
+* Explore the **SimToM** notebook for perspective-aware reasoning
+* Read the **Schema Patterns** guide for complex reasoning structures
+* Check the **Error Handling** guide for robust implementations
+
+## Further Reading
+
+* [Chain-of-Thought Paper](https://arxiv.org/abs/2201.11903)
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)
+* [Batch Processing Guide](../guides/batch_processing.md)

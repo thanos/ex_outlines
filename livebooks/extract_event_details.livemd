@@ -1,0 +1,631 @@
+# Extract Event Details
+
+## Introduction
+
+This notebook demonstrates extracting structured event information from casual, unstructured text. We'll parse natural language descriptions and convert them into standardized event data.
+
+**Example Input**: "Let's postpone our math review to next Monday at 2pm. We can meet at 3 avenue des tanneurs."
+
+**Structured Output**: Title, location, ISO 8601 timestamp
+
+**Learning Objectives:**
+
+* Extract structured data from casual text
+* Parse relative time references ("next Monday")
+* Convert to standardized formats (ISO 8601)
+* Handle location extraction
+* Build calendar integration schemas
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Event Extraction Schema
+
+Define a schema for structured event information.
+
+```elixir
+# Schema for event details
+event_schema =
+  Schema.new(%{
+    title: %{
+      type: :string,
+      required: true,
+      min_length: 3,
+      max_length: 100,
+      description: "Event title or subject"
+    },
+    location: %{
+      type: {:union, [%{type: :string, max_length: 200}, %{type: :null}]},
+      required: false,
+      description: "Physical or virtual location"
+    },
+    start_time: %{
+      type: :string,
+      required: true,
+      pattern: ~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+      description: "Start time in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)"
+    },
+    end_time: %{
+      type: {:union, [
+        %{type: :string, pattern: ~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/},
+        %{type: :null}
+      ]},
+      required: false,
+      description: "End time in ISO 8601 format (optional)"
+    },
+    duration_minutes: %{
+      type: {:union, [%{type: :integer, min: 15, max: 480}, %{type: :null}]},
+      required: false,
+      description: "Event duration in minutes (15 minutes to 8 hours)"
+    },
+    attendees: %{
+      type: {:array, %{type: :string, max_length: 100}},
+      required: false,
+      unique_items: true,
+      max_items: 20,
+      description: "List of attendee names or emails"
+    },
+    notes: %{
+      type: {:union, [%{type: :string, max_length: 500}, %{type: :null}]},
+      required: false,
+      description: "Additional notes or context"
+    }
+  })
+
+IO.puts("Event extraction schema defined")
+:ok
+```
+
+## Example 1: Postponed Meeting
+
+Extract event details from a rescheduling message.
+
+```elixir
+# Context: Today is Saturday, November 16, 2024, at 10:55 AM
+context = %{
+  current_date: ~D[2024-11-16],
+  current_time: ~T[10:55:00],
+  current_datetime: ~U[2024-11-16 10:55:00Z]
+}
+
+message_1 = """
+Let's postpone our math review to next Monday at 2pm.
+We can meet at 3 avenue des tanneurs.
+"""
+
+# Build prompt with context
+prompt_1 = """
+Today is #{Date.day_of_week(context.current_date) |> day_name()}, #{Calendar.strftime(context.current_date, "%B %d, %Y")}
+Current time: #{Time.to_string(context.current_time)}
+
+Message:
+#{message_1}
+
+Extract structured event information. Convert relative times to absolute ISO 8601 format.
+"""
+
+IO.puts("=== Example 1: Postponed Meeting ===")
+IO.puts("\nContext:")
+IO.puts("  Date: #{context.current_date}")
+IO.puts("  Time: #{context.current_time}")
+IO.puts("\nMessage:")
+IO.puts(message_1)
+
+# In production:
+# {:ok, event} = ExOutlines.generate(event_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "Extract event details from messages."},
+#       %{role: "user", content: prompt_1}
+#     ]
+#   ]
+# )
+
+expected_event_1 = %{
+  "title" => "Math Review",
+  "location" => "3 avenue des tanneurs",
+  "start_time" => "2024-11-18T14:00:00Z",  # Next Monday at 2pm
+  "end_time" => nil,
+  "duration_minutes" => 60,  # Assumed default
+  "attendees" => [],
+  "notes" => "Postponed from original schedule"
+}
+
+IO.puts("\n=== Extracted Event ===")
+IO.inspect(expected_event_1, pretty: true)
+
+# Validate
+case Spec.validate(event_schema, expected_event_1) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Valid event extraction")
+    IO.puts("\nFormatted:")
+    IO.puts("  Title: #{validated.title}")
+    IO.puts("  When: #{validated.start_time}")
+    IO.puts("  Where: #{validated.location}")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+    nil
+end
+
+# Helper function for day names
+defp day_name(1), do: "Monday"
+defp day_name(2), do: "Tuesday"
+defp day_name(3), do: "Wednesday"
+defp day_name(4), do: "Thursday"
+defp day_name(5), do: "Friday"
+defp day_name(6), do: "Saturday"
+defp day_name(7), do: "Sunday"
+```
+
+## Example 2: Team Meeting
+
+Extract from a more complex message with multiple details.
+
+```elixir
+message_2 = """
+Team sync tomorrow at 10:30am in Conference Room B.
+We'll discuss Q4 planning, budget review, and the new project launch.
+Expected attendees: Sarah, John, Maria, and Alex.
+Should take about 90 minutes.
+"""
+
+expected_event_2 = %{
+  "title" => "Team Sync - Q4 Planning",
+  "location" => "Conference Room B",
+  "start_time" => "2024-11-17T10:30:00Z",  # Tomorrow at 10:30am
+  "end_time" => "2024-11-17T12:00:00Z",  # 90 minutes later
+  "duration_minutes" => 90,
+  "attendees" => ["Sarah", "John", "Maria", "Alex"],
+  "notes" => "Topics: Q4 planning, budget review, new project launch"
+}
+
+IO.puts("\n\n=== Example 2: Team Meeting ===")
+IO.puts("\nMessage:")
+IO.puts(message_2)
+IO.puts("\n=== Extracted Event ===")
+IO.inspect(expected_event_2, pretty: true)
+
+case Spec.validate(event_schema, expected_event_2) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Valid event extraction")
+    IO.puts("\nFormatted:")
+    IO.puts("  #{validated.title}")
+    IO.puts("  #{validated.start_time} - #{validated.end_time}")
+    IO.puts("  Duration: #{validated.duration_minutes} minutes")
+    IO.puts("  Location: #{validated.location}")
+    IO.puts("  Attendees: #{Enum.join(validated.attendees, ", ")}")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+    nil
+end
+```
+
+## Time Parsing Helpers
+
+Functions to convert relative time references to absolute timestamps.
+
+```elixir
+defmodule TimeParser do
+  @moduledoc """
+  Parse relative time references to absolute ISO 8601 timestamps.
+  """
+
+  @doc """
+  Calculate absolute date from relative references.
+  """
+  def parse_relative_day(reference, base_date) do
+    case String.downcase(reference) do
+      "today" -> base_date
+      "tomorrow" -> Date.add(base_date, 1)
+      "next week" -> Date.add(base_date, 7)
+      "next monday" -> next_day_of_week(base_date, 1)
+      "next tuesday" -> next_day_of_week(base_date, 2)
+      "next wednesday" -> next_day_of_week(base_date, 3)
+      "next thursday" -> next_day_of_week(base_date, 4)
+      "next friday" -> next_day_of_week(base_date, 5)
+      "next saturday" -> next_day_of_week(base_date, 6)
+      "next sunday" -> next_day_of_week(base_date, 7)
+      _ -> base_date
+    end
+  end
+
+  defp next_day_of_week(base_date, target_day) do
+    current_day = Date.day_of_week(base_date)
+    days_ahead = rem(target_day - current_day + 7, 7)
+    days_ahead = if days_ahead == 0, do: 7, else: days_ahead
+    Date.add(base_date, days_ahead)
+  end
+
+  @doc """
+  Parse time string to Time struct.
+  """
+  def parse_time(time_str) do
+    time_str = String.downcase(time_str)
+
+    cond do
+      String.contains?(time_str, "pm") ->
+        parse_12h(time_str, :pm)
+
+      String.contains?(time_str, "am") ->
+        parse_12h(time_str, :am)
+
+      true ->
+        parse_24h(time_str)
+    end
+  end
+
+  defp parse_12h(time_str, period) do
+    # Extract hour and minutes
+    case Regex.run(~r/(\d{1,2}):?(\d{2})?/, time_str) do
+      [_, hour_str] ->
+        hour = String.to_integer(hour_str)
+        hour = adjust_for_period(hour, period)
+        {:ok, Time.new!(hour, 0, 0)}
+
+      [_, hour_str, min_str] ->
+        hour = String.to_integer(hour_str)
+        hour = adjust_for_period(hour, period)
+        min = String.to_integer(min_str)
+        {:ok, Time.new!(hour, min, 0)}
+
+      _ ->
+        {:error, :invalid_time}
+    end
+  end
+
+  defp adjust_for_period(hour, :am) when hour == 12, do: 0
+  defp adjust_for_period(hour, :am), do: hour
+  defp adjust_for_period(hour, :pm) when hour == 12, do: 12
+  defp adjust_for_period(hour, :pm), do: hour + 12
+
+  defp parse_24h(time_str) do
+    case Regex.run(~r/(\d{1,2}):(\d{2})/, time_str) do
+      [_, hour_str, min_str] ->
+        {:ok, Time.new!(String.to_integer(hour_str), String.to_integer(min_str), 0)}
+
+      _ ->
+        {:error, :invalid_time}
+    end
+  end
+
+  @doc """
+  Combine date and time into ISO 8601 string.
+  """
+  def to_iso8601(date, time) do
+    datetime = DateTime.new!(date, time, "Etc/UTC")
+    DateTime.to_iso8601(datetime)
+  end
+end
+
+# Test time parsing
+IO.puts("\n\n=== Time Parsing Examples ===")
+
+base_date = ~D[2024-11-16]  # Saturday
+
+examples = [
+  {"tomorrow", "10:30am"},
+  {"next Monday", "2pm"},
+  {"next Friday", "14:00"},
+  {"today", "9:15am"}
+]
+
+Enum.each(examples, fn {day_ref, time_ref} ->
+  date = TimeParser.parse_relative_day(day_ref, base_date)
+  {:ok, time} = TimeParser.parse_time(time_ref)
+  iso8601 = TimeParser.to_iso8601(date, time)
+
+  IO.puts("\"#{day_ref} at #{time_ref}\" -> #{iso8601}")
+end)
+```
+
+## Calendar Integration
+
+Generate iCalendar (ICS) format for calendar apps.
+
+```elixir
+defmodule ICalendarGenerator do
+  @moduledoc """
+  Generate iCalendar format from event data.
+  """
+
+  def to_ics(event) do
+    """
+    BEGIN:VCALENDAR
+    VERSION:2.0
+    PRODID:-//ExOutlines//Event Extractor//EN
+    BEGIN:VEVENT
+    UID:#{generate_uid()}
+    DTSTART:#{format_ics_datetime(event.start_time)}
+    #{if event.end_time, do: "DTEND:#{format_ics_datetime(event.end_time)}\n", else: ""}SUMMARY:#{event.title}
+    #{if event.location, do: "LOCATION:#{event.location}\n", else: ""}#{if event.notes, do: "DESCRIPTION:#{event.notes}\n", else: ""}#{if event.attendees && length(event.attendees) > 0, do: format_attendees(event.attendees), else: ""}END:VEVENT
+    END:VCALENDAR
+    """
+  end
+
+  defp generate_uid do
+    :crypto.strong_rand_bytes(16)
+    |> Base.encode16(case: :lower)
+    |> Kernel.<>("@exoutlines.local")
+  end
+
+  defp format_ics_datetime(iso8601_str) do
+    # Convert ISO 8601 to iCalendar format (YYYYMMDDTHHMMSSZ)
+    String.replace(iso8601_str, ~r/[-:]/, "")
+  end
+
+  defp format_attendees(attendees) do
+    attendees
+    |> Enum.map(fn attendee ->
+      "ATTENDEE:mailto:#{String.downcase(String.replace(attendee, " ", "."))}@example.com\n"
+    end)
+    |> Enum.join()
+  end
+end
+
+# Generate ICS for extracted event
+if expected_event_1 do
+  ics_content = ICalendarGenerator.to_ics(expected_event_1)
+
+  IO.puts("\n\n=== iCalendar Format ===")
+  IO.puts(ics_content)
+  IO.puts("\nThis can be imported into Google Calendar, Outlook, Apple Calendar, etc.")
+end
+```
+
+## Batch Event Extraction
+
+Extract multiple events from a longer message.
+
+```elixir
+defmodule BatchEventExtractor do
+  def extract_multiple(text, api_key, model) do
+    # Schema for multiple events
+    multi_event_schema = Schema.new(%{
+      events: %{
+        type: {:array, %{type: {:object, event_schema}}},
+        required: true,
+        min_items: 1,
+        max_items: 10,
+        description: "List of extracted events"
+      }
+    })
+
+    # In production:
+    # ExOutlines.generate(multi_event_schema,
+    #   backend: HTTP,
+    #   backend_opts: [
+    #     api_key: api_key,
+    #     model: model,
+    #     messages: [
+    #       %{role: "system", content: "Extract all events from the message."},
+    #       %{role: "user", content: text}
+    #     ]
+    #   ]
+    # )
+
+    # Simulated
+    {:ok, [expected_event_1, expected_event_2]}
+  end
+end
+
+# Example: Extract multiple events
+complex_message = """
+Quick update on this week's schedule:
+
+Monday at 9am - Weekly standup in the main conference room with the whole team.
+
+Tuesday at 2:30pm - Client presentation at their office (123 Main St).
+This will be about 2 hours.
+
+Friday at 4pm - Happy hour at Joe's Bar! Everyone's invited.
+"""
+
+IO.puts("\n\n=== Batch Extraction ===")
+IO.puts("\nMessage:")
+IO.puts(complex_message)
+IO.puts("\n(Would extract 3 separate events from this message)")
+```
+
+## Production Implementation
+
+```elixir
+defmodule ProductionEventExtractor do
+  @moduledoc """
+  Production-ready event extraction system.
+  """
+
+  def extract(message, context, opts \\ []) do
+    api_key = Keyword.fetch!(opts, :api_key)
+    model = Keyword.get(opts, :model, "gpt-4o-mini")
+
+    # Build prompt with context
+    prompt = build_prompt(message, context)
+
+    # Extract event
+    case ExOutlines.generate(event_schema(),
+      backend: HTTP,
+      backend_opts: [
+        api_key: api_key,
+        model: model,
+        messages: [
+          %{role: "system", content: system_prompt()},
+          %{role: "user", content: prompt}
+        ]
+      ]
+    ) do
+      {:ok, event} ->
+        # Post-process and validate
+        case post_process(event, context) do
+          {:ok, processed_event} ->
+            {:ok, processed_event}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp system_prompt do
+    """
+    You are an event extraction system. Extract structured event information from messages.
+
+    Requirements:
+    - Convert all times to ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
+    - Parse relative times ("tomorrow", "next Monday") correctly
+    - Extract all attendees mentioned
+    - Infer reasonable defaults for missing information (e.g., 60-minute duration)
+    - Include context in notes field when relevant
+    """
+  end
+
+  defp build_prompt(message, context) do
+    """
+    Current context:
+    Date: #{context.current_date}
+    Time: #{context.current_time}
+    Day of week: #{Date.day_of_week(context.current_date)}
+
+    Message:
+    #{message}
+
+    Extract the event details.
+    """
+  end
+
+  defp post_process(event, context) do
+    # Validate extracted time is in the future
+    case DateTime.from_iso8601(event.start_time) do
+      {:ok, start_dt, _} ->
+        if DateTime.compare(start_dt, context.current_datetime) == :gt do
+          {:ok, event}
+        else
+          {:error, "Extracted time is in the past"}
+        end
+
+      {:error, _} ->
+        {:error, "Invalid datetime format"}
+    end
+  end
+
+  defp event_schema do
+    # Return the event schema
+  end
+end
+```
+
+## Key Takeaways
+
+**Event Extraction Pattern:**
+
+* Parse natural language to structured data
+* Handle relative time references
+* Convert to standardized formats
+* Extract all relevant metadata
+
+**Schema Design:**
+
+* Use ISO 8601 for timestamps (interoperable)
+* Make location and end_time optional
+* Include notes field for context
+* Support multiple attendees
+
+**Production Considerations:**
+
+* Always include current date/time context
+* Validate extracted times are reasonable
+* Handle timezone conversions
+* Support batch extraction
+* Generate calendar-compatible formats
+
+**Common Challenges:**
+
+* Ambiguous time references ("this Friday" - which one?)
+* Missing timezone information
+* Informal location descriptions
+* Implicit attendees
+* Duration estimation
+
+## Real-World Applications
+
+**Calendar Integration:**
+- Email-to-calendar parsers
+- SMS event extraction
+- Meeting note processors
+- Schedule coordinators
+
+**Task Management:**
+- Project deadline extraction
+- Milestone tracking
+- Reminder systems
+- Team coordination
+
+**Customer Service:**
+- Appointment scheduling
+- Booking systems
+- Follow-up tracking
+- Service requests
+
+## Challenges
+
+Try these exercises:
+
+1. Add timezone support (parse "3pm EST" correctly)
+2. Handle recurring events ("every Monday")
+3. Extract duration from phrases ("half hour meeting")
+4. Parse date ranges ("December 15-17")
+5. Support virtual meeting links
+6. Handle conflicts and double-bookings
+
+## Next Steps
+
+* Try the **Named Entity Extraction** notebook for general extraction patterns
+* Explore the **Chain of Thought** notebook for complex parsing
+* Read the **Schema Patterns** guide for format validation
+* Check the **Phoenix Integration** guide for web applications
+
+## Further Reading
+
+* [ISO 8601 DateTime Standard](https://en.wikipedia.org/wiki/ISO_8601)
+* [iCalendar Format (RFC 5545)](https://tools.ietf.org/html/rfc5545)
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)

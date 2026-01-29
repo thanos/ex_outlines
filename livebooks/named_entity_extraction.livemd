@@ -1,0 +1,664 @@
+# Named Entity Extraction
+
+## Introduction
+
+Named Entity Extraction (NER) is the process of identifying and extracting specific information from unstructured text. This notebook demonstrates how to use ExOutlines to extract structured data from natural language descriptions.
+
+**Example Use Case**: Extracting order details from customer messages at a pizza restaurant.
+
+**Learning Objectives:**
+
+* Define schemas for entity extraction
+* Extract multiple entities from text
+* Handle optional and required fields
+* Validate extracted data
+* Process multiple examples in batch
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines schemas
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration - uses Livebook secrets
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Understanding the Task
+
+When customers order pizza, they provide information in natural language:
+
+> "Hi, I'd like to order a large pepperoni pizza with extra cheese. Deliver it to 123 Main St, apartment 5B. My name is John Smith and my phone number is 555-0123."
+
+We need to extract:
+
+* Customer name
+* Phone number
+* Address (including apartment number)
+* Pizza size
+* Toppings
+* Special instructions
+
+## Defining the Schema
+
+Let's create a schema that captures all the information in a pizza order.
+
+```elixir
+# Define the pizza order schema
+pizza_order_schema =
+  Schema.new(%{
+    customer_name: %{
+      type: :string,
+      required: true,
+      min_length: 2,
+      max_length: 100,
+      description: "Customer's full name"
+    },
+    phone_number: %{
+      type: :string,
+      required: true,
+      pattern: ~r/^\d{3}-\d{4}$/,
+      description: "Phone number in format XXX-XXXX"
+    },
+    address: %{
+      type: {:object,
+       Schema.new(%{
+         street: %{
+           type: :string,
+           required: true,
+           description: "Street address"
+         },
+         apartment: %{
+           type: {:union, [%{type: :string}, %{type: :null}]},
+           required: false,
+           description: "Apartment or unit number"
+         },
+         city: %{
+           type: :string,
+           required: false,
+           description: "City name"
+         },
+         zip_code: %{
+           type: {:union, [%{type: :string, pattern: ~r/^\d{5}$/}, %{type: :null}]},
+           required: false,
+           description: "5-digit ZIP code"
+         }
+       })},
+      required: true,
+      description: "Delivery address"
+    },
+    order_items: %{
+      type:
+        {:array,
+         %{
+           type:
+             {:object,
+              Schema.new(%{
+                item_type: %{
+                  type: {:enum, ["pizza", "drink", "side", "dessert"]},
+                  required: true,
+                  description: "Type of item ordered"
+                },
+                size: %{
+                  type: {:enum, ["small", "medium", "large", "extra large"]},
+                  required: false,
+                  description: "Size of the item"
+                },
+                toppings: %{
+                  type: {:array, %{type: :string, max_length: 50}},
+                  required: false,
+                  unique_items: true,
+                  max_items: 10,
+                  description: "Toppings or customizations"
+                },
+                quantity: %{
+                  type: :integer,
+                  required: true,
+                  min: 1,
+                  max: 20,
+                  description: "Number of items"
+                }
+              })}
+         }},
+      required: true,
+      min_items: 1,
+      max_items: 10,
+      description: "Items in the order"
+    },
+    special_instructions: %{
+      type: {:union, [%{type: :string, max_length: 500}, %{type: :null}]},
+      required: false,
+      description: "Any special delivery or preparation instructions"
+    },
+    delivery_time: %{
+      type: {:union, [%{type: :string}, %{type: :null}]},
+      required: false,
+      description: "Requested delivery time (e.g., 'ASAP', '6:30 PM', 'in 45 minutes')"
+    }
+  })
+
+IO.puts("Schema defined successfully")
+:ok
+```
+
+## Example 1: Simple Order
+
+Let's extract information from a basic pizza order.
+
+```elixir
+order_text_1 = """
+Hi, I'd like to order a large pepperoni pizza.
+My name is John Smith, phone number 555-0123.
+Deliver to 123 Main Street.
+"""
+
+# In production, you would call:
+# result = ExOutlines.generate(pizza_order_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "Extract pizza order information from the customer message."},
+#       %{role: "user", content: order_text_1}
+#     ]
+#   ]
+# )
+
+# Expected extraction
+expected_result_1 = %{
+  "customer_name" => "John Smith",
+  "phone_number" => "555-0123",
+  "address" => %{
+    "street" => "123 Main Street",
+    "apartment" => nil,
+    "city" => nil,
+    "zip_code" => nil
+  },
+  "order_items" => [
+    %{
+      "item_type" => "pizza",
+      "size" => "large",
+      "toppings" => ["pepperoni"],
+      "quantity" => 1
+    }
+  ],
+  "special_instructions" => nil,
+  "delivery_time" => nil
+}
+
+IO.puts("Order text:")
+IO.puts(order_text_1)
+IO.puts("\nExpected extraction:")
+IO.inspect(expected_result_1, pretty: true)
+
+# Validate the extraction
+case Spec.validate(pizza_order_schema, expected_result_1) do
+  {:ok, validated} ->
+    IO.puts("\nValidation successful")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\nValidation failed:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Example 2: Complex Order
+
+Now let's handle a more complex order with multiple items and special instructions.
+
+```elixir
+order_text_2 = """
+Hey! This is Sarah Johnson at 555-7890. I need:
+- Two large pizzas: one with mushrooms and olives, the other with sausage and peppers
+- One medium cheese pizza for the kids
+- A 2-liter Coke
+- Garlic bread
+
+Deliver to 456 Oak Avenue, Apartment 12B, Springfield, 62701.
+Please ring the doorbell twice - the first ring doesn't always work.
+Need it by 7:00 PM if possible. Thanks!
+"""
+
+expected_result_2 = %{
+  "customer_name" => "Sarah Johnson",
+  "phone_number" => "555-7890",
+  "address" => %{
+    "street" => "456 Oak Avenue",
+    "apartment" => "12B",
+    "city" => "Springfield",
+    "zip_code" => "62701"
+  },
+  "order_items" => [
+    %{
+      "item_type" => "pizza",
+      "size" => "large",
+      "toppings" => ["mushrooms", "olives"],
+      "quantity" => 1
+    },
+    %{
+      "item_type" => "pizza",
+      "size" => "large",
+      "toppings" => ["sausage", "peppers"],
+      "quantity" => 1
+    },
+    %{
+      "item_type" => "pizza",
+      "size" => "medium",
+      "toppings" => ["cheese"],
+      "quantity" => 1
+    },
+    %{
+      "item_type" => "drink",
+      "size" => nil,
+      "toppings" => ["Coke", "2-liter"],
+      "quantity" => 1
+    },
+    %{
+      "item_type" => "side",
+      "size" => nil,
+      "toppings" => ["garlic bread"],
+      "quantity" => 1
+    }
+  ],
+  "special_instructions" => "Ring the doorbell twice - the first ring doesn't always work",
+  "delivery_time" => "7:00 PM"
+}
+
+IO.puts("Order text:")
+IO.puts(order_text_2)
+IO.puts("\nExpected extraction:")
+IO.inspect(expected_result_2, pretty: true)
+
+# Validate
+case Spec.validate(pizza_order_schema, expected_result_2) do
+  {:ok, validated} ->
+    IO.puts("\nValidation successful")
+    IO.puts("\nOrder Summary:")
+    IO.puts("Customer: #{validated.customer_name}")
+    IO.puts("Phone: #{validated.phone_number}")
+    IO.puts("Address: #{validated.address.street}")
+    if validated.address.apartment, do: IO.puts("Apt: #{validated.address.apartment}")
+    IO.puts("\nItems:")
+
+    Enum.each(validated.order_items, fn item ->
+      toppings_str =
+        if item.toppings && length(item.toppings) > 0 do
+          " with #{Enum.join(item.toppings, ", ")}"
+        else
+          ""
+        end
+
+      size_str = if item.size, do: "#{item.size} ", else: ""
+      IO.puts("  - #{item.quantity}x #{size_str}#{item.item_type}#{toppings_str}")
+    end)
+
+    if validated.special_instructions do
+      IO.puts("\nSpecial Instructions: #{validated.special_instructions}")
+    end
+
+    if validated.delivery_time do
+      IO.puts("Requested time: #{validated.delivery_time}")
+    end
+
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\nValidation failed:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Example 3: Ambiguous Order
+
+What happens when the order is ambiguous or missing information?
+
+```elixir
+order_text_3 = """
+I want a pizza with pepperoni and mushrooms.
+Deliver to Main Street.
+"""
+
+# This order is missing:
+# - Customer name
+# - Phone number
+# - Complete address
+# - Pizza size
+
+# The LLM might make reasonable assumptions, but our schema requires certain fields.
+# Let's see what a reasonable extraction might look like:
+
+attempted_result_3 = %{
+  "customer_name" => "Unknown",
+  # Missing phone - validation will fail
+  "address" => %{
+    "street" => "Main Street"
+    # Missing apartment, city, zip
+  },
+  "order_items" => [
+    %{
+      "item_type" => "pizza",
+      "size" => "large",
+      # Assumed size
+      "toppings" => ["pepperoni", "mushrooms"],
+      "quantity" => 1
+    }
+  ]
+}
+
+IO.puts("Order text:")
+IO.puts(order_text_3)
+IO.puts("\nAttempted extraction:")
+IO.inspect(attempted_result_3, pretty: true)
+
+# This should fail validation
+case Spec.validate(pizza_order_schema, attempted_result_3) do
+  {:ok, _validated} ->
+    IO.puts("\nUnexpected: Validation passed")
+
+  {:error, diagnostics} ->
+    IO.puts("\nExpected: Validation failed due to missing required fields:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+end
+```
+
+## Handling Missing Information
+
+In production, you have several options for handling incomplete information:
+
+1. **Make fields optional**: Change `required: true` to `required: false`
+2. **Use union types**: Allow fields to be `null` when information is missing
+3. **Request clarification**: Ask the customer for missing details
+4. **Use defaults**: Apply reasonable defaults for missing fields
+
+Let's create a more forgiving schema:
+
+```elixir
+# Relaxed schema for handling incomplete orders
+relaxed_order_schema =
+  Schema.new(%{
+    customer_name: %{
+      type: {:union, [%{type: :string}, %{type: :null}]},
+      required: false,
+      description: "Customer's name (if provided)"
+    },
+    phone_number: %{
+      type: {:union, [%{type: :string}, %{type: :null}]},
+      required: false,
+      description: "Phone number (if provided)"
+    },
+    address: %{
+      type:
+        {:union,
+         [
+           %{
+             type:
+               {:object,
+                Schema.new(%{
+                  street: %{type: :string, required: true},
+                  apartment: %{type: {:union, [%{type: :string}, %{type: :null}]}},
+                  city: %{type: {:union, [%{type: :string}, %{type: :null}]}},
+                  zip_code: %{type: {:union, [%{type: :string}, %{type: :null}]}}
+                })}
+           },
+           %{type: :null}
+         ]},
+      required: false,
+      description: "Delivery address (if provided)"
+    },
+    order_items: %{
+      type:
+        {:array,
+         %{
+           type:
+             {:object,
+              Schema.new(%{
+                item_type: %{
+                  type: {:enum, ["pizza", "drink", "side", "dessert"]},
+                  required: true
+                },
+                size: %{
+                  type: {:union, [%{type: {:enum, ["small", "medium", "large", "extra large"]}}, %{type: :null}]},
+                  required: false
+                },
+                toppings: %{
+                  type: {:array, %{type: :string}},
+                  required: false
+                },
+                quantity: %{type: :integer, required: true, min: 1}
+              })}
+         }},
+      required: true,
+      min_items: 1
+    },
+    missing_info: %{
+      type: {:array, %{type: :string}},
+      required: false,
+      description: "List of information that needs to be clarified with customer"
+    }
+  })
+
+# Now the ambiguous order should validate
+relaxed_result_3 = %{
+  "customer_name" => nil,
+  "phone_number" => nil,
+  "address" => %{
+    "street" => "Main Street",
+    "apartment" => nil,
+    "city" => nil,
+    "zip_code" => nil
+  },
+  "order_items" => [
+    %{
+      "item_type" => "pizza",
+      "size" => nil,
+      "toppings" => ["pepperoni", "mushrooms"],
+      "quantity" => 1
+    }
+  ],
+  "missing_info" => ["customer_name", "phone_number", "pizza_size", "complete_address"]
+}
+
+case Spec.validate(relaxed_order_schema, relaxed_result_3) do
+  {:ok, validated} ->
+    IO.puts("Validation successful with relaxed schema")
+
+    if validated.missing_info && length(validated.missing_info) > 0 do
+      IO.puts("\nInformation needed from customer:")
+
+      Enum.each(validated.missing_info, fn info ->
+        IO.puts("  - #{info}")
+      end)
+    end
+
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("Validation failed:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Batch Processing Multiple Orders
+
+In a real restaurant system, you'd process many orders concurrently.
+
+```elixir
+# Multiple order messages
+orders = [
+  "Hi, John at 555-1111. Large pepperoni pizza to 100 First St.",
+  "Sarah here, 555-2222. Two medium pizzas, one cheese and one veggie. 200 Second Ave, Apt 3.",
+  "Mike, 555-3333. Family special with breadsticks. 300 Third Blvd, need it by 6 PM."
+]
+
+# In production, you would process these in batch:
+# tasks = Enum.map(orders, fn order_text ->
+#   {pizza_order_schema, [
+#     backend: HTTP,
+#     backend_opts: [
+#       api_key: api_key,
+#       model: model,
+#       messages: [
+#         %{role: "system", content: "Extract pizza order information."},
+#         %{role: "user", content: order_text}
+#       ]
+#     ]
+#   ]}
+# end)
+#
+# results = ExOutlines.generate_batch(tasks, max_concurrency: 5)
+
+IO.puts("Would process #{length(orders)} orders concurrently")
+IO.puts("Each order extraction happens in parallel")
+IO.puts("Results would be returned in order")
+```
+
+## Real-World Integration
+
+Here's how you'd integrate this into a Phoenix application:
+
+```elixir
+# Example Phoenix controller
+defmodule PizzaWeb.OrderController do
+  use PizzaWeb, :controller
+  alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+  def create(conn, %{"order_text" => text}) do
+    case extract_order(text) do
+      {:ok, order_data} ->
+        # Check if all required information is present
+        if has_required_info?(order_data) do
+          # Create order in database
+          {:ok, order} = Orders.create_order(order_data)
+          json(conn, %{status: "confirmed", order_id: order.id})
+        else
+          # Request missing information
+          missing = get_missing_info(order_data)
+          json(conn, %{status: "incomplete", missing: missing, partial_data: order_data})
+        end
+
+      {:error, reason} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: "Could not process order", reason: inspect(reason)})
+    end
+  end
+
+  defp extract_order(text) do
+    ExOutlines.generate(pizza_order_schema(),
+      backend: HTTP,
+      backend_opts: [
+        api_key: System.get_env("OPENAI_API_KEY"),
+        model: "gpt-4o-mini",
+        messages: [
+          %{role: "system", content: "Extract structured order information."},
+          %{role: "user", content: text}
+        ]
+      ]
+    )
+  end
+
+  defp has_required_info?(order) do
+    order.customer_name != nil and
+      order.phone_number != nil and
+      order.address != nil and
+      length(order.order_items) > 0
+  end
+
+  defp get_missing_info(order) do
+    []
+    |> maybe_add(is_nil(order.customer_name), "customer_name")
+    |> maybe_add(is_nil(order.phone_number), "phone_number")
+    |> maybe_add(is_nil(order.address), "address")
+  end
+
+  defp maybe_add(list, true, item), do: [item | list]
+  defp maybe_add(list, false, _item), do: list
+
+  defp pizza_order_schema do
+    # Schema definition here
+  end
+end
+```
+
+## Key Takeaways
+
+**Schema Design:**
+
+* Use nested objects for complex structures (address)
+* Use arrays for repeating elements (order items)
+* Use union types with null for optional fields
+* Use enums for categorical data (item_type, size)
+* Add pattern validation for formatted data (phone, zip)
+
+**Error Handling:**
+
+* Strict schemas catch missing information early
+* Relaxed schemas allow partial extraction
+* Track missing information explicitly
+* Provide clear feedback to users
+
+**Production Considerations:**
+
+* Process orders in batch for high volume
+* Cache common extractions (menu items)
+* Monitor extraction accuracy
+* Have fallback for extraction failures
+* Allow manual override for edge cases
+
+**Performance:**
+
+* Batch processing handles concurrent orders
+* Use smaller models (gpt-4o-mini) for simple extraction
+* Cache schema compilation
+* Monitor API costs
+
+## Next Steps
+
+* Try the **Chain of Density** notebook for summarization
+* Explore the **Q&A with Citations** notebook for information retrieval
+* Read the **Batch Processing** guide for production patterns
+* Check the **Error Handling** guide for robust systems
+
+## Further Reading
+
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Batch Processing Guide](../guides/batch_processing.md)
+* [Phoenix Integration Guide](../guides/phoenix_integration.md)
+* [Production Examples](../examples/)

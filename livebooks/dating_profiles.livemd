@@ -1,0 +1,659 @@
+# Dating Profile Generation
+
+## Introduction
+
+This notebook demonstrates how to generate structured dating profiles from brief descriptions using LLMs and ExOutlines. It shows practical use of prompt templating, structured generation, and data validation.
+
+**Use Cases:**
+
+* User profile generation for dating apps
+* Content generation from minimal input
+* Profile enrichment and expansion
+* A/B testing different profile styles
+
+**Learning Objectives:**
+
+* Use EEx templates for prompt construction
+* Generate creative content with structure
+* Validate generated profiles
+* Handle different profile styles
+* Compare outputs from different models
+
+**Prerequisites:**
+
+* Basic Elixir knowledge
+* Familiarity with ExOutlines
+* OpenAI API key
+
+## Setup
+
+```elixir
+# Install dependencies
+Mix.install([
+  {:ex_outlines, "~> 0.2.0"},
+  {:kino, "~> 0.12"}
+])
+```
+
+```elixir
+# Imports and aliases
+alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+# Configuration
+api_key = System.fetch_env!("LB_OPENAI_API_KEY")
+model = "gpt-4o-mini"
+
+:ok
+```
+
+## Defining the Profile Schema
+
+A dating profile needs to be engaging, authentic, and structured. Let's define what makes a good profile.
+
+```elixir
+dating_profile_schema =
+  Schema.new(%{
+    headline: %{
+      type: :string,
+      required: true,
+      min_length: 10,
+      max_length: 100,
+      description: "Catchy headline that captures personality (10-100 characters)"
+    },
+    bio: %{
+      type: :string,
+      required: true,
+      min_length: 100,
+      max_length: 500,
+      description: "Engaging bio that tells a story (100-500 characters)"
+    },
+    interests: %{
+      type: {:array, %{type: :string, min_length: 2, max_length: 30}},
+      required: true,
+      unique_items: true,
+      min_items: 3,
+      max_items: 8,
+      description: "List of hobbies and interests (3-8 items)"
+    },
+    looking_for: %{
+      type: :string,
+      required: true,
+      min_length: 50,
+      max_length: 300,
+      description: "What they're looking for in a partner (50-300 characters)"
+    },
+    conversation_starters: %{
+      type: {:array, %{type: :string, min_length: 10, max_length: 150}},
+      required: true,
+      unique_items: true,
+      min_items: 2,
+      max_items: 5,
+      description: "Questions or topics to start a conversation (2-5 items)"
+    },
+    personality_traits: %{
+      type: {:array, %{type: :string, min_length: 3, max_length: 25}},
+      required: true,
+      unique_items: true,
+      min_items: 3,
+      max_items: 6,
+      description: "Key personality traits (3-6 items)"
+    },
+    ideal_date: %{
+      type: :string,
+      required: false,
+      min_length: 30,
+      max_length: 200,
+      description: "Description of an ideal first date"
+    },
+    fun_fact: %{
+      type: {:union, [%{type: :string, min_length: 20, max_length: 150}, %{type: :null}]},
+      required: false,
+      description: "An interesting or surprising fun fact"
+    }
+  })
+
+IO.puts("Profile schema defined")
+:ok
+```
+
+## Prompt Template with EEx
+
+We'll use EEx (Embedded Elixir) to create dynamic prompts that guide the LLM to generate profiles in different styles.
+
+```elixir
+defmodule ProfilePromptTemplate do
+  require EEx
+
+  @base_template """
+  You are a professional dating profile writer helping people create engaging profiles.
+
+  Create a dating profile based on this brief description:
+  <%= @user_description %>
+
+  Profile Style: <%= @style %>
+
+  Requirements:
+  - Write in first person
+  - Be authentic and genuine
+  - Highlight personality, not just facts
+  - Make it engaging and conversation-worthy
+  - <%= @tone %> tone
+  - Target age range: <%= @age_range %>
+
+  <%= if @additional_context do %>
+  Additional context:
+  <%= @additional_context %>
+  <% end %>
+
+  Create a complete profile following the provided structure.
+  """
+
+  def render(user_description, opts \\ []) do
+    style = Keyword.get(opts, :style, "authentic and warm")
+    tone = Keyword.get(opts, :tone, "friendly and approachable")
+    age_range = Keyword.get(opts, :age_range, "25-35")
+    additional_context = Keyword.get(opts, :additional_context, nil)
+
+    EEx.eval_string(@base_template,
+      assigns: [
+        user_description: user_description,
+        style: style,
+        tone: tone,
+        age_range: age_range,
+        additional_context: additional_context
+      ]
+    )
+  end
+end
+
+# Test the template
+test_prompt =
+  ProfilePromptTemplate.render(
+    "I'm a software engineer who loves hiking and cooking. Looking for someone to share adventures with.",
+    style: "casual and fun",
+    tone: "playful",
+    age_range: "28-38"
+  )
+
+IO.puts("Generated prompt:")
+IO.puts(test_prompt)
+:ok
+```
+
+## Example 1: Outdoor Enthusiast
+
+Let's generate a profile for someone who loves outdoor activities.
+
+```elixir
+user_description_1 = """
+I'm a 29-year-old environmental scientist who spends every weekend in the mountains.
+I love rock climbing, backpacking, and wildlife photography. I'm passionate about
+conservation and environmental education. Looking for someone who enjoys the outdoors
+and wants to explore new trails together.
+"""
+
+# In production:
+# result = ExOutlines.generate(dating_profile_schema,
+#   backend: HTTP,
+#   backend_opts: [
+#     api_key: api_key,
+#     model: model,
+#     messages: [
+#       %{role: "system", content: "You are a professional dating profile writer."},
+#       %{role: "user", content: ProfilePromptTemplate.render(user_description_1)}
+#     ]
+#   ]
+# )
+
+# Expected profile
+expected_profile_1 = %{
+  "headline" => "Conservation scientist seeking adventure partner for mountain explorations",
+  "bio" =>
+    "Environmental scientist by day, mountain explorer by heart. You'll find me most weekends with my camera, capturing wildlife moments between rock climbs and backpacking trips. I believe the best conversations happen on the trail, and the best connections are built through shared adventures. My work in conservation isn't just a job - it's a calling to protect the places I love.",
+  "interests" => [
+    "Rock climbing",
+    "Backpacking",
+    "Wildlife photography",
+    "Environmental conservation",
+    "Trail running",
+    "Camping"
+  ],
+  "looking_for" =>
+    "Someone who gets excited about sunrise hikes and isn't afraid to get muddy. You don't need to be an expert climber or photographer - just someone curious about nature and ready for weekend adventures. Bonus points if you're passionate about making a difference for the planet.",
+  "conversation_starters" => [
+    "What's the most memorable sunset you've ever seen?",
+    "Tell me about your favorite hiking trail and what makes it special",
+    "If you could photograph any animal in the wild, which would you choose?"
+  ],
+  "personality_traits" => [
+    "Adventurous",
+    "Environmentally conscious",
+    "Patient",
+    "Curious",
+    "Active"
+  ],
+  "ideal_date" =>
+    "A sunrise hike to a scenic overlook, followed by breakfast at a local cafe where we can swap trail stories and plan our next adventure.",
+  "fun_fact" =>
+    "I once spent a week living in a tent at 12,000 feet to study alpine marmot behavior. The marmots were skeptical at first, but we eventually became friends."
+}
+
+IO.puts("Input description:")
+IO.puts(user_description_1)
+IO.puts("\nGenerated profile:")
+IO.inspect(expected_profile_1, pretty: true)
+
+# Validate
+case Spec.validate(dating_profile_schema, expected_profile_1) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Profile validated")
+
+    IO.puts("\n=== Preview ===")
+    IO.puts("\n#{validated.headline}")
+    IO.puts("\n#{validated.bio}")
+    IO.puts("\nInterests: #{Enum.join(validated.interests, ", ")}")
+    IO.puts("\nLooking for: #{validated.looking_for}")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Example 2: Creative Professional
+
+Now let's generate a profile for someone in a creative field.
+
+```elixir
+user_description_2 = """
+I'm a 32-year-old graphic designer and illustrator. I spend my days creating brand
+identities and my evenings working on my graphic novel. I love indie films, jazz music,
+and trying new restaurants. I'm into board game nights and art gallery visits.
+Looking for someone creative who appreciates good design and doesn't mind my apartment
+being full of sketchbooks.
+"""
+
+expected_profile_2 = %{
+  "headline" => "Designer by day, storyteller by night - seeking my co-creator in life's adventures",
+  "bio" =>
+    "I bring brands to life by day and fictional worlds by night through my graphic novel project. My apartment is a creative chaos of sketchbooks, ink bottles, and way too many succulents. I believe good design is everywhere - from the perfect espresso cup to the typography on a vintage poster. When I'm not at my drawing tablet, you'll find me at jazz clubs, indie theaters, or testing new restaurants with friends.",
+  "interests" => [
+    "Graphic design",
+    "Illustration",
+    "Indie films",
+    "Jazz music",
+    "Board games",
+    "Gallery hopping",
+    "Food adventures"
+  ],
+  "looking_for" =>
+    "Someone who gets excited about good design, has opinions about font choices (even if they're different from mine), and enjoys long conversations over coffee or wine. You don't need to be an artist, but an appreciation for creativity and aesthetics would be wonderful. Board game competitive streak optional but encouraged.",
+  "conversation_starters" => [
+    "What's a movie that changed how you see the world?",
+    "Tell me about the best meal you've ever had - what made it special?",
+    "What's your go-to board game when you want to crush your friends' spirits?"
+  ],
+  "personality_traits" => ["Creative", "Observant", "Passionate", "Playful", "Thoughtful"],
+  "ideal_date" =>
+    "An evening at a contemporary art gallery, followed by dinner at that new fusion place downtown, and maybe ending with a competitive round of our favorite board game over wine.",
+  "fun_fact" =>
+    "My graphic novel features a detective who solves crimes by analyzing typography. It's nerdier than it sounds, and I'm okay with that."
+}
+
+IO.puts("Input description:")
+IO.puts(user_description_2)
+IO.puts("\nGenerated profile:")
+
+case Spec.validate(dating_profile_schema, expected_profile_2) do
+  {:ok, validated} ->
+    IO.puts("\n[SUCCESS] Profile validated")
+
+    IO.puts("\n=== Preview ===")
+    IO.puts("\n#{validated.headline}")
+    IO.puts("\n#{validated.bio}")
+    validated
+
+  {:error, diagnostics} ->
+    IO.puts("\n[FAILED] Validation errors:")
+
+    Enum.each(diagnostics.errors, fn error ->
+      IO.puts("  #{error.message}")
+    end)
+
+    nil
+end
+```
+
+## Different Profile Styles
+
+The same person can have different profiles depending on the tone and style. Let's explore variations.
+
+```elixir
+base_description = """
+I'm a 27-year-old data scientist who loves cooking, playing guitar, and running marathons.
+I read a lot of sci-fi and enjoy philosophy discussions over good wine.
+"""
+
+# Style 1: Casual and playful
+style_casual = %{
+  style: "casual and playful",
+  tone: "fun and lighthearted",
+  age_range: "25-32"
+}
+
+# Style 2: Thoughtful and introspective
+style_thoughtful = %{
+  style: "thoughtful and introspective",
+  tone: "genuine and deep",
+  age_range: "26-35"
+}
+
+# Style 3: Confident and direct
+style_confident = %{
+  style: "confident and direct",
+  tone: "bold and authentic",
+  age_range: "25-33"
+}
+
+IO.puts("Same person, three different profile styles:\n")
+IO.puts("1. Casual Prompt:")
+IO.puts(ProfilePromptTemplate.render(base_description, style_casual))
+IO.puts("\n" <> String.duplicate("=", 70))
+IO.puts("\n2. Thoughtful Prompt:")
+IO.puts(ProfilePromptTemplate.render(base_description, style_thoughtful))
+IO.puts("\n" <> String.duplicate("=", 70))
+IO.puts("\n3. Confident Prompt:")
+IO.puts(ProfilePromptTemplate.render(base_description, style_confident))
+```
+
+## Profile Quality Metrics
+
+Let's create functions to evaluate profile quality.
+
+```elixir
+defmodule ProfileQuality do
+  @doc """
+  Calculate readability score based on character counts and structure.
+  """
+  def readability_score(profile) do
+    bio_length = String.length(profile.bio)
+    headline_length = String.length(profile.headline)
+
+    bio_score =
+      cond do
+        bio_length < 150 -> 0.5
+        bio_length >= 150 and bio_length <= 400 -> 1.0
+        true -> 0.7
+      end
+
+    headline_score =
+      cond do
+        headline_length < 20 -> 0.5
+        headline_length >= 20 and headline_length <= 80 -> 1.0
+        true -> 0.7
+      end
+
+    (bio_score + headline_score) / 2
+  end
+
+  @doc """
+  Check completeness of profile.
+  """
+  def completeness_score(profile) do
+    total_fields = 8
+    filled_fields = count_filled_fields(profile)
+    filled_fields / total_fields
+  end
+
+  defp count_filled_fields(profile) do
+    [
+      profile.headline,
+      profile.bio,
+      length(profile.interests) > 0,
+      profile.looking_for,
+      length(profile.conversation_starters) > 0,
+      length(profile.personality_traits) > 0,
+      profile.ideal_date,
+      profile.fun_fact
+    ]
+    |> Enum.count(fn
+      nil -> false
+      false -> false
+      _ -> true
+    end)
+  end
+
+  @doc """
+  Calculate engagement potential based on conversation starters and interests.
+  """
+  def engagement_score(profile) do
+    starter_count = length(profile.conversation_starters)
+    interest_count = length(profile.interests)
+
+    starter_score =
+      cond do
+        starter_count < 2 -> 0.3
+        starter_count >= 2 and starter_count <= 4 -> 1.0
+        true -> 0.8
+      end
+
+    interest_score =
+      cond do
+        interest_count < 3 -> 0.3
+        interest_count >= 3 and interest_count <= 7 -> 1.0
+        true -> 0.7
+      end
+
+    (starter_score + interest_score) / 2
+  end
+
+  @doc """
+  Overall profile score.
+  """
+  def overall_score(profile) do
+    readability = readability_score(profile)
+    completeness = completeness_score(profile)
+    engagement = engagement_score(profile)
+
+    %{
+      readability: Float.round(readability, 2),
+      completeness: Float.round(completeness, 2),
+      engagement: Float.round(engagement, 2),
+      overall: Float.round((readability + completeness + engagement) / 3, 2)
+    }
+  end
+end
+
+# Evaluate the outdoor enthusiast profile
+if expected_profile_1 do
+  scores = ProfileQuality.overall_score(expected_profile_1)
+
+  IO.puts("\n=== Profile Quality Scores ===")
+  IO.puts("Readability: #{scores.readability}")
+  IO.puts("Completeness: #{scores.completeness}")
+  IO.puts("Engagement: #{scores.engagement}")
+  IO.puts("Overall: #{scores.overall}")
+
+  if scores.overall >= 0.8 do
+    IO.puts("\nProfile quality: Excellent")
+  else
+    if scores.overall >= 0.6 do
+      IO.puts("\nProfile quality: Good")
+    else
+      IO.puts("\nProfile quality: Needs improvement")
+    end
+  end
+end
+```
+
+## A/B Testing Profiles
+
+Generate multiple versions and compare them.
+
+```elixir
+defmodule ProfileABTest do
+  def generate_variants(description, count \\ 3) do
+    styles = [
+      [style: "casual and fun", tone: "playful"],
+      [style: "authentic and warm", tone: "genuine"],
+      [style: "confident and bold", tone: "direct"]
+    ]
+
+    # In production, you would generate multiple profiles:
+    # tasks = Enum.take(Stream.cycle(styles), count)
+    # |> Enum.map(fn style_opts ->
+    #   prompt = ProfilePromptTemplate.render(description, style_opts)
+    #   {dating_profile_schema, [
+    #     backend: HTTP,
+    #     backend_opts: [
+    #       api_key: api_key,
+    #       model: model,
+    #       messages: [
+    #         %{role: "system", content: "You are a dating profile writer."},
+    #         %{role: "user", content: prompt}
+    #       ]
+    #     ]
+    #   ]}
+    # end)
+    #
+    # ExOutlines.generate_batch(tasks, max_concurrency: 3)
+
+    IO.puts("Would generate #{count} profile variants concurrently")
+    IO.puts("Each with different style: #{inspect(Enum.map(styles, & &1[:style]))}")
+  end
+
+  def compare_variants(variants) do
+    variants
+    |> Enum.with_index(1)
+    |> Enum.map(fn {{:ok, profile}, index} ->
+      scores = ProfileQuality.overall_score(profile)
+      {index, profile, scores}
+    end)
+    |> Enum.sort_by(fn {_idx, _profile, scores} -> scores.overall end, :desc)
+  end
+end
+
+# Test A/B testing
+ProfileABTest.generate_variants(user_description_1, 3)
+```
+
+## Real-World Integration
+
+Here's how to integrate profile generation into a dating app:
+
+```elixir
+# Phoenix LiveView example
+defmodule MyAppWeb.ProfileGeneratorLive do
+  use MyAppWeb, :live_view
+  alias ExOutlines.{Spec.Schema, Backend.HTTP}
+
+  def mount(_params, _session, socket) do
+    {:ok,
+     assign(socket,
+       description: "",
+       style: "authentic",
+       generated_profile: nil,
+       generating: false,
+       error: nil
+     )}
+  end
+
+  def handle_event("generate", %{"description" => desc, "style" => style}, socket) do
+    # Start generation in background
+    pid = self()
+
+    Task.start(fn ->
+      result = generate_profile(desc, style)
+      send(pid, {:profile_generated, result})
+    end)
+
+    {:noreply, assign(socket, generating: true, error: nil)}
+  end
+
+  def handle_info({:profile_generated, {:ok, profile}}, socket) do
+    {:noreply, assign(socket, generated_profile: profile, generating: false)}
+  end
+
+  def handle_info({:profile_generated, {:error, reason}}, socket) do
+    {:noreply, assign(socket, error: reason, generating: false)}
+  end
+
+  defp generate_profile(description, style) do
+    prompt = ProfilePromptTemplate.render(description, style: style)
+
+    ExOutlines.generate(dating_profile_schema(),
+      backend: HTTP,
+      backend_opts: [
+        api_key: System.get_env("OPENAI_API_KEY"),
+        model: "gpt-4o-mini",
+        messages: [
+          %{role: "system", content: "You are a professional dating profile writer."},
+          %{role: "user", content: prompt}
+        ]
+      ],
+      max_retries: 2,
+      timeout: 30_000
+    )
+  end
+end
+```
+
+## Key Takeaways
+
+**Prompt Engineering:**
+
+* Use templates for consistent prompt structure
+* Allow customization through parameters
+* Include clear requirements and constraints
+* Specify tone, style, and target audience
+
+**Schema Design:**
+
+* Balance structure with creativity
+* Use character limits for different sections
+* Require enough content for engagement
+* Make some fields optional for flexibility
+
+**Quality Control:**
+
+* Validate generated content
+* Score profiles on multiple dimensions
+* A/B test different approaches
+* Collect user feedback
+
+**Production Tips:**
+
+* Generate multiple variants
+* Let users choose their favorite
+* Allow manual editing
+* Cache common descriptions
+* Monitor generation costs
+
+## Challenges
+
+Try these exercises:
+
+1. Add a `tone_of_voice` field to the schema and generate profiles in different voices
+2. Create a schema for professional networking profiles (LinkedIn-style)
+3. Implement a feedback system where users rate generated profiles
+4. Build a profile improvement system that iteratively refines profiles
+5. Add demographic fields and generate age-appropriate profiles
+
+## Next Steps
+
+* Explore the **Chain of Density** notebook for iterative content refinement
+* Try the **Named Entity Extraction** notebook for data extraction
+* Read the **Schema Patterns** guide for advanced schema design
+* Check the **Phoenix Integration** guide for web app patterns
+
+## Further Reading
+
+* [Schema Patterns Guide](../guides/schema_patterns.md)
+* [Core Concepts Guide](../guides/core_concepts.md)
+* [Testing Strategies Guide](../guides/testing_strategies.md)
