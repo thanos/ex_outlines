@@ -275,14 +275,14 @@ IO.inspect(expected_academic, pretty: true)
 
 case DocumentMetadataExtraction.validate_metadata(expected_academic) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     # Format citation
     citation = DocumentMetadataExtraction.format_citation(validated)
-    IO.puts("\n📚 Citation: #{citation}")
+    IO.puts("\n[INFO] Citation: #{citation}")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -349,13 +349,13 @@ IO.inspect(expected_blog, pretty: true)
 
 case DocumentMetadataExtraction.validate_metadata(expected_blog) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     citation = DocumentMetadataExtraction.format_citation(validated)
-    IO.puts("\n📚 Citation: #{citation}")
+    IO.puts("\n[INFO] Citation: #{citation}")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -433,13 +433,13 @@ IO.inspect(expected_whitepaper, pretty: true)
 
 case DocumentMetadataExtraction.validate_metadata(expected_whitepaper) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     citation = DocumentMetadataExtraction.format_citation(validated)
-    IO.puts("\n📚 Citation: #{citation}")
+    IO.puts("\n[INFO] Citation: #{citation}")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 

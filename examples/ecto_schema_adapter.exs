@@ -110,11 +110,11 @@ defmodule Example do
 
     case result do
       {:ok, data} ->
-        IO.puts("✅ Successfully generated user data:")
+        IO.puts("[SUCCESS] Successfully generated user data:")
         IO.inspect(data, pretty: true)
 
       {:error, reason} ->
-        IO.puts("❌ Generation failed: #{inspect(reason)}")
+        IO.puts("[FAILED] Generation failed: #{inspect(reason)}")
     end
 
     IO.puts("")
@@ -132,11 +132,11 @@ defmodule Example do
 
     case Spec.validate(user_schema, valid_data) do
       {:ok, validated} ->
-        IO.puts("✅ Valid data passed validation:")
+        IO.puts("[SUCCESS] Valid data passed validation:")
         IO.inspect(validated, pretty: true)
 
       {:error, diagnostics} ->
-        IO.puts("❌ Validation failed:")
+        IO.puts("[FAILED] Validation failed:")
         IO.puts(diagnostics.repair_instructions)
     end
 
@@ -153,10 +153,10 @@ defmodule Example do
 
     case Spec.validate(user_schema, invalid_data) do
       {:ok, _validated} ->
-        IO.puts("✅ Validation passed (unexpected)")
+        IO.puts("[SUCCESS] Validation passed (unexpected)")
 
       {:error, diagnostics} ->
-        IO.puts("❌ Validation failed as expected:")
+        IO.puts("[FAILED] Validation failed as expected:")
         IO.puts(diagnostics.repair_instructions)
     end
 
@@ -237,12 +237,12 @@ defmodule Example do
     IO.puts("Key Takeaways:")
     IO.puts("=" |> String.duplicate(70))
     IO.puts("""
-    1. ✅ No duplicate schema definitions - reuse existing Ecto schemas
-    2. ✅ Automatic validation extraction from changesets
-    3. ✅ Seamless integration with ExOutlines.generate/2
-    4. ✅ Support for embedded schemas, enums, and arrays
-    5. ✅ Custom descriptions for better LLM guidance
-    6. ✅ Type-safe validation and data generation
+    1. [SUCCESS] No duplicate schema definitions - reuse existing Ecto schemas
+    2. [SUCCESS] Automatic validation extraction from changesets
+    3. [SUCCESS] Seamless integration with ExOutlines.generate/2
+    4. [SUCCESS] Support for embedded schemas, enums, and arrays
+    5. [SUCCESS] Custom descriptions for better LLM guidance
+    6. [SUCCESS] Type-safe validation and data generation
     """)
   end
 end

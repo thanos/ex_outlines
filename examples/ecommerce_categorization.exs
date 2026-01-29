@@ -187,12 +187,12 @@ IO.inspect(expected_macbook, pretty: true)
 # Validate the expected output
 case EcommerceCategorization.validate_product(expected_macbook) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
     IO.puts("Validated data:")
     IO.inspect(validated, pretty: true)
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -236,10 +236,10 @@ IO.inspect(expected_shoes, pretty: true)
 
 case EcommerceCategorization.validate_product(expected_shoes) do
   {:ok, _validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -284,10 +284,10 @@ IO.inspect(expected_instantpot, pretty: true)
 
 case EcommerceCategorization.validate_product(expected_instantpot) do
   {:ok, _validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 

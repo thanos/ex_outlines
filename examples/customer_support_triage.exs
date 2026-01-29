@@ -220,7 +220,7 @@ IO.inspect(expected_critical, pretty: true)
 
 case CustomerSupportTriage.validate_ticket(expected_critical) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     # Calculate SLA deadline
     deadline = CustomerSupportTriage.calculate_sla_deadline(
@@ -231,7 +231,7 @@ case CustomerSupportTriage.validate_ticket(expected_critical) do
     IO.puts("   (Critical priority: 0.5x multiplier on 1h = 30 minutes)")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -284,7 +284,7 @@ IO.inspect(expected_high, pretty: true)
 
 case CustomerSupportTriage.validate_ticket(expected_high) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     deadline = CustomerSupportTriage.calculate_sla_deadline(
       validated.priority,
@@ -294,7 +294,7 @@ case CustomerSupportTriage.validate_ticket(expected_high) do
     IO.puts("   (High priority: 0.75x multiplier on 4h = 3 hours)")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -341,7 +341,7 @@ IO.inspect(expected_medium, pretty: true)
 
 case CustomerSupportTriage.validate_ticket(expected_medium) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     deadline = CustomerSupportTriage.calculate_sla_deadline(
       validated.priority,
@@ -351,7 +351,7 @@ case CustomerSupportTriage.validate_ticket(expected_medium) do
     IO.puts("   (Medium priority: 1.0x multiplier on 1 week = 7 days)")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
@@ -396,7 +396,7 @@ IO.inspect(expected_low, pretty: true)
 
 case CustomerSupportTriage.validate_ticket(expected_low) do
   {:ok, validated} ->
-    IO.puts("\n✅ Validation successful!")
+    IO.puts("\n[SUCCESS] Validation successful!")
 
     deadline = CustomerSupportTriage.calculate_sla_deadline(
       validated.priority,
@@ -406,7 +406,7 @@ case CustomerSupportTriage.validate_ticket(expected_low) do
     IO.puts("   (Low priority: 1.5x multiplier on 24h = 36 hours)")
 
   {:error, diagnostics} ->
-    IO.puts("\n❌ Validation failed:")
+    IO.puts("\n[FAILED] Validation failed:")
     IO.inspect(diagnostics, pretty: true)
 end
 
