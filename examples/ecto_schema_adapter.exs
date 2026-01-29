@@ -27,8 +27,8 @@ defmodule Example do
 
   # Define an Ecto schema with validations
   defmodule User do
-    use Ecto.Schema
-    import Ecto.Changeset
+    use Elixir.Ecto.Schema
+    import Elixir.Ecto.Changeset
 
     schema "users" do
       field(:email, :string)
@@ -54,11 +54,11 @@ defmodule Example do
   end
 
   defmodule Product do
-    use Ecto.Schema
-    import Ecto.Changeset
+    use Elixir.Ecto.Schema
+    import Elixir.Ecto.Changeset
 
     defmodule Price do
-      use Ecto.Schema
+      use Elixir.Ecto.Schema
 
       embedded_schema do
         field(:amount, :decimal)
