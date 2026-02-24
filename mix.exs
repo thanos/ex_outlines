@@ -68,7 +68,7 @@ defmodule ExOutlines.MixProject do
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
-      maintainers: ["Your Name"],
+      maintainers: ["Thanos Vassilakis"],
       files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
