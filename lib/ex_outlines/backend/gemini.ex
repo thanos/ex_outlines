@@ -162,11 +162,11 @@ defmodule ExOutlines.Backend.Gemini do
 
   defp parse_response(response_body) do
     case Jason.decode(response_body) do
-      {:ok, %{"candidates" => [%{"content" => %{"parts" => [%{"text" => text} | _]}} | _]}} ->
-        {:ok, text}
-
       {:ok, %{"candidates" => [%{"finishReason" => reason} | _]}} when reason != "STOP" ->
         {:error, {:generation_stopped, reason}}
+
+      {:ok, %{"candidates" => [%{"content" => %{"parts" => [%{"text" => text} | _]}} | _]}} ->
+        {:ok, text}
 
       {:ok, %{"error" => %{"message" => message, "status" => status}}} ->
         {:error, {:api_error, status, message}}

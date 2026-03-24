@@ -112,32 +112,6 @@ defmodule ExOutlines.Template do
   @spec build_messages(String.t(), keyword(), ExOutlines.Spec.t()) :: [ExOutlines.Prompt.message()]
   def build_messages(template, assigns, spec) do
     rendered = render(template, assigns)
-    schema = ExOutlines.Spec.to_schema(spec)
-    schema_json = Jason.encode!(schema, pretty: true)
-
-    system_content = """
-    You are a structured data generator. You must produce valid JSON that conforms to the provided schema.
-
-    Requirements:
-    - Output ONLY valid JSON, no additional text or markdown
-    - Follow all field constraints exactly
-    - Include all required fields
-    - Use correct types for all fields
-    """
-
-    user_content = """
-    #{rendered}
-
-    Generate JSON output conforming to this schema:
-
-    #{schema_json}
-
-    Respond with valid JSON only.
-    """
-
-    [
-      %{role: "system", content: String.trim(system_content)},
-      %{role: "user", content: String.trim(user_content)}
-    ]
+    ExOutlines.Prompt.build_initial(spec, rendered)
   end
 end

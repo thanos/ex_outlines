@@ -34,6 +34,10 @@ defmodule ExOutlines do
   - `:backend_opts` - Options passed to backend (model, temperature, etc.)
   - `:max_retries` - Maximum retry attempts (default: 3)
   - `:telemetry_metadata` - Additional telemetry context
+  - `:template` - Optional `{template_string, assigns}` tuple where `template_string`
+    is an EEx template and `assigns` is a keyword list of variables. When provided,
+    the rendered template is used as the user prompt instead of the default.
+    See `ExOutlines.Template` for details.
 
   ## Returns
 
@@ -201,7 +205,14 @@ defmodule ExOutlines do
       Map.merge(metadata, %{spec: spec, backend: backend})
     )
 
-    result = generation_loop(spec, backend, backend_opts, max_retries, 0, [], template)
+    ctx = %{
+      backend: backend,
+      backend_opts: backend_opts,
+      max_retries: max_retries,
+      template: template
+    }
+
+    result = generation_loop(spec, ctx, 0, [])
 
     duration = System.monotonic_time() - start_time
 
@@ -226,20 +237,12 @@ defmodule ExOutlines do
     end
   end
 
-  defp generation_loop(_spec, _backend, _backend_opts, max_retries, attempt, _messages, _template)
+  defp generation_loop(_spec, %{max_retries: max_retries}, attempt, _messages)
        when attempt >= max_retries do
     {:error, :max_retries_exceeded}
   end
 
-  defp generation_loop(
-         spec,
-         backend,
-         backend_opts,
-         max_retries,
-         attempt,
-         previous_messages,
-         template
-       ) do
+  defp generation_loop(spec, ctx, attempt, previous_messages) do
     :telemetry.execute(
       [:ex_outlines, :attempt, :start],
       %{attempt: attempt},
@@ -248,14 +251,14 @@ defmodule ExOutlines do
 
     messages =
       if attempt == 0 do
-        build_initial_messages(spec, template)
+        build_initial_messages(spec, ctx.template)
       else
         previous_messages
       end
 
-    case call_backend(backend, messages, backend_opts) do
+    case call_backend(ctx.backend, messages, ctx.backend_opts) do
       {:ok, response} ->
-        process_response(spec, response, backend, backend_opts, max_retries, attempt, messages)
+        process_response(spec, response, ctx, attempt, messages)
 
       {:error, reason} ->
         :telemetry.execute(
@@ -282,31 +285,13 @@ defmodule ExOutlines do
       {:error, {:backend_exception, error}}
   end
 
-  defp process_response(spec, response, backend, backend_opts, max_retries, attempt, messages) do
+  defp process_response(spec, response, ctx, attempt, messages) do
     case decode_json(response) do
       {:ok, decoded} ->
-        validate_and_complete(
-          spec,
-          decoded,
-          response,
-          backend,
-          backend_opts,
-          max_retries,
-          attempt,
-          messages
-        )
+        validate_and_complete(spec, decoded, response, ctx, attempt, messages)
 
       {:error, json_error} ->
-        handle_decode_error(
-          spec,
-          response,
-          json_error,
-          backend,
-          backend_opts,
-          max_retries,
-          attempt,
-          messages
-        )
+        handle_decode_error(spec, response, json_error, ctx, attempt, messages)
     end
   end
 
@@ -317,16 +302,7 @@ defmodule ExOutlines do
     end
   end
 
-  defp validate_and_complete(
-         spec,
-         decoded,
-         raw_response,
-         backend,
-         backend_opts,
-         max_retries,
-         attempt,
-         messages
-       ) do
+  defp validate_and_complete(spec, decoded, raw_response, ctx, attempt, messages) do
     case ExOutlines.Spec.validate(spec, decoded) do
       {:ok, validated} ->
         :telemetry.execute(
@@ -344,29 +320,11 @@ defmodule ExOutlines do
           %{diagnostics: diagnostics}
         )
 
-        retry_with_repair(
-          spec,
-          raw_response,
-          diagnostics,
-          backend,
-          backend_opts,
-          max_retries,
-          attempt,
-          messages
-        )
+        retry_with_repair(spec, raw_response, diagnostics, ctx, attempt, messages)
     end
   end
 
-  defp handle_decode_error(
-         spec,
-         response,
-         json_error,
-         backend,
-         backend_opts,
-         max_retries,
-         attempt,
-         messages
-       ) do
+  defp handle_decode_error(spec, response, json_error, ctx, attempt, messages) do
     :telemetry.execute(
       [:ex_outlines, :attempt, :decode_failed],
       %{attempt: attempt},
@@ -385,28 +343,10 @@ defmodule ExOutlines do
       repair_instructions: "Output must be valid JSON. Error: #{Exception.message(json_error)}"
     }
 
-    retry_with_repair(
-      spec,
-      response,
-      diagnostics,
-      backend,
-      backend_opts,
-      max_retries,
-      attempt,
-      messages
-    )
+    retry_with_repair(spec, response, diagnostics, ctx, attempt, messages)
   end
 
-  defp retry_with_repair(
-         spec,
-         previous_output,
-         diagnostics,
-         backend,
-         backend_opts,
-         max_retries,
-         attempt,
-         previous_messages
-       ) do
+  defp retry_with_repair(spec, previous_output, diagnostics, ctx, attempt, previous_messages) do
     repair_messages = ExOutlines.Prompt.build_repair(previous_output, diagnostics)
     new_messages = previous_messages ++ repair_messages
 
@@ -416,6 +356,6 @@ defmodule ExOutlines do
       %{diagnostics: diagnostics}
     )
 
-    generation_loop(spec, backend, backend_opts, max_retries, attempt + 1, new_messages, nil)
+    generation_loop(spec, ctx, attempt + 1, new_messages)
   end
 end

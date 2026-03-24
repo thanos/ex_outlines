@@ -185,6 +185,22 @@ defmodule ExOutlines.Spec.Schema do
 
   # Private helpers
 
+  defp validate_numeric_opt!(spec, key) do
+    case Map.get(spec, key) do
+      nil -> nil
+      value when is_number(value) -> value
+      other -> raise ArgumentError, "#{key} must be a number, got: #{inspect(other)}"
+    end
+  end
+
+  defp validate_positive_numeric_opt!(spec, key) do
+    case Map.get(spec, key) do
+      nil -> nil
+      value when is_number(value) and value > 0 -> value
+      other -> raise ArgumentError, "#{key} must be a positive number, got: #{inspect(other)}"
+    end
+  end
+
   defp normalize_field_spec(spec) when is_map(spec) do
     # If Ecto is available, normalize Ecto-style DSL first
     spec =
@@ -211,9 +227,9 @@ defmodule ExOutlines.Spec.Schema do
       max_length: Map.get(spec, :max_length),
       min: Map.get(spec, :min),
       max: Map.get(spec, :max),
-      exclusive_min: Map.get(spec, :exclusive_min),
-      exclusive_max: Map.get(spec, :exclusive_max),
-      multiple_of: Map.get(spec, :multiple_of),
+      exclusive_min: validate_numeric_opt!(spec, :exclusive_min),
+      exclusive_max: validate_numeric_opt!(spec, :exclusive_max),
+      multiple_of: validate_positive_numeric_opt!(spec, :multiple_of),
       min_items: Map.get(spec, :min_items),
       max_items: Map.get(spec, :max_items),
       unique_items: Map.get(spec, :unique_items, false),
@@ -953,7 +969,6 @@ defmodule ExOutlines.Spec.Schema do
     defp validate_exclusive_max(_name, _ex_max, _value), do: []
 
     defp validate_multiple_of(_name, nil, _value), do: []
-    defp validate_multiple_of(_name, mult, _value) when not is_number(mult) or mult <= 0, do: []
 
     defp validate_multiple_of(name, mult, value) when is_number(value) do
       is_multiple =
