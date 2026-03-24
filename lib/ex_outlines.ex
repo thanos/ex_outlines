@@ -9,7 +9,8 @@ defmodule ExOutlines do
           backend: module(),
           backend_opts: keyword(),
           max_retries: pos_integer(),
-          telemetry_metadata: map()
+          telemetry_metadata: map(),
+          template: {String.t(), keyword()}
         ]
 
   @type generate_result :: {:ok, any()} | {:error, term()}
@@ -150,6 +151,7 @@ defmodule ExOutlines do
     backend_opts = Keyword.get(opts, :backend_opts, [])
     max_retries = Keyword.get(opts, :max_retries, 3)
     telemetry_metadata = Keyword.get(opts, :telemetry_metadata, %{})
+    template = Keyword.get(opts, :template)
 
     case backend do
       nil ->
@@ -161,7 +163,8 @@ defmodule ExOutlines do
            backend: backend,
            backend_opts: backend_opts,
            max_retries: max_retries,
-           telemetry_metadata: telemetry_metadata
+           telemetry_metadata: telemetry_metadata,
+           template: template
          }}
 
       _ ->
@@ -174,7 +177,8 @@ defmodule ExOutlines do
       backend: backend,
       backend_opts: backend_opts,
       max_retries: max_retries,
-      telemetry_metadata: metadata
+      telemetry_metadata: metadata,
+      template: template
     } = config
 
     start_time = System.monotonic_time()
@@ -185,7 +189,7 @@ defmodule ExOutlines do
       Map.merge(metadata, %{spec: spec, backend: backend})
     )
 
-    result = generation_loop(spec, backend, backend_opts, max_retries, 0, [])
+    result = generation_loop(spec, backend, backend_opts, max_retries, 0, [], template)
 
     duration = System.monotonic_time() - start_time
 
@@ -210,12 +214,12 @@ defmodule ExOutlines do
     end
   end
 
-  defp generation_loop(_spec, _backend, _backend_opts, max_retries, attempt, _messages)
+  defp generation_loop(_spec, _backend, _backend_opts, max_retries, attempt, _messages, _template)
        when attempt >= max_retries do
     {:error, :max_retries_exceeded}
   end
 
-  defp generation_loop(spec, backend, backend_opts, max_retries, attempt, previous_messages) do
+  defp generation_loop(spec, backend, backend_opts, max_retries, attempt, previous_messages, template) do
     :telemetry.execute(
       [:ex_outlines, :attempt, :start],
       %{attempt: attempt},
@@ -224,7 +228,7 @@ defmodule ExOutlines do
 
     messages =
       if attempt == 0 do
-        ExOutlines.Prompt.build_initial(spec)
+        build_initial_messages(spec, template)
       else
         previous_messages
       end
@@ -242,6 +246,12 @@ defmodule ExOutlines do
 
         {:error, {:backend_error, reason}}
     end
+  end
+
+  defp build_initial_messages(spec, nil), do: ExOutlines.Prompt.build_initial(spec)
+
+  defp build_initial_messages(spec, {template, assigns}) when is_binary(template) and is_list(assigns) do
+    ExOutlines.Template.build_messages(template, assigns, spec)
   end
 
   defp call_backend(backend, messages, opts) do
@@ -385,6 +395,6 @@ defmodule ExOutlines do
       %{diagnostics: diagnostics}
     )
 
-    generation_loop(spec, backend, backend_opts, max_retries, attempt + 1, new_messages)
+    generation_loop(spec, backend, backend_opts, max_retries, attempt + 1, new_messages, nil)
   end
 end

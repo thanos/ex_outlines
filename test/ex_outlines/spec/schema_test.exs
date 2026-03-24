@@ -908,6 +908,116 @@ defmodule ExOutlines.Spec.SchemaTest do
     end
   end
 
+  describe "exclusive min/max constraints" do
+    test "exclusive_min rejects value equal to boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_min: 0}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"score" => 0})
+      assert hd(diag.errors).message =~ "greater than 0 (exclusive)"
+    end
+
+    test "exclusive_min accepts value above boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_min: 0}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"score" => 1})
+      assert result.score == 1
+    end
+
+    test "exclusive_max rejects value equal to boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_max: 100}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"score" => 100})
+      assert hd(diag.errors).message =~ "less than 100 (exclusive)"
+    end
+
+    test "exclusive_max accepts value below boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_max: 100}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"score" => 99})
+      assert result.score == 99
+    end
+
+    test "exclusive_min works with number type" do
+      schema = Schema.new(%{temp: %{type: :number, exclusive_min: 0.0}})
+
+      assert {:error, _} = Spec.validate(schema, %{"temp" => 0.0})
+      assert {:ok, result} = Spec.validate(schema, %{"temp" => 0.001})
+      assert result.temp == 0.001
+    end
+
+    test "exclusive_max works with number type" do
+      schema = Schema.new(%{temp: %{type: :number, exclusive_max: 100.0}})
+
+      assert {:error, _} = Spec.validate(schema, %{"temp" => 100.0})
+      assert {:ok, result} = Spec.validate(schema, %{"temp" => 99.999})
+      assert result.temp == 99.999
+    end
+
+    test "JSON Schema includes exclusiveMinimum and exclusiveMaximum" do
+      schema =
+        Schema.new(%{
+          value: %{type: :integer, exclusive_min: 0, exclusive_max: 100}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      value_schema = json_schema.properties.value
+      assert value_schema[:exclusiveMinimum] == 0
+      assert value_schema[:exclusiveMaximum] == 100
+    end
+  end
+
+  describe "multiple_of constraint" do
+    test "validates integer is multiple of value" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => 10})
+      assert result.quantity == 10
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => 0})
+      assert result.quantity == 0
+    end
+
+    test "rejects integer that is not a multiple" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"quantity" => 7})
+      assert hd(diag.errors).message =~ "multiple of 5"
+    end
+
+    test "validates number is multiple of float value" do
+      schema = Schema.new(%{price: %{type: :number, multiple_of: 0.25}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"price" => 1.75})
+      assert result.price == 1.75
+    end
+
+    test "rejects number that is not a multiple of float" do
+      schema = Schema.new(%{price: %{type: :number, multiple_of: 0.25}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"price" => 1.3})
+      assert hd(diag.errors).message =~ "multiple of 0.25"
+    end
+
+    test "JSON Schema includes multipleOf" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      json_schema = Spec.to_schema(schema)
+      assert json_schema.properties.quantity[:multipleOf] == 5
+    end
+
+    test "combined with min/max constraints" do
+      schema =
+        Schema.new(%{
+          value: %{type: :integer, min: 0, max: 100, multiple_of: 10}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"value" => 50})
+      assert {:error, _} = Spec.validate(schema, %{"value" => 55})
+      assert {:error, _} = Spec.validate(schema, %{"value" => -10})
+      assert {:error, _} = Spec.validate(schema, %{"value" => 110})
+    end
+  end
+
   describe "array validation" do
     test "validates array of strings" do
       schema =

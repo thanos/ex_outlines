@@ -150,6 +150,9 @@ defmodule ExOutlines.Spec.Schema do
       max_length: Keyword.get(opts, :max_length),
       min: Keyword.get(opts, :min),
       max: Keyword.get(opts, :max),
+      exclusive_min: Keyword.get(opts, :exclusive_min),
+      exclusive_max: Keyword.get(opts, :exclusive_max),
+      multiple_of: Keyword.get(opts, :multiple_of),
       min_items: Keyword.get(opts, :min_items),
       max_items: Keyword.get(opts, :max_items),
       unique_items: Keyword.get(opts, :unique_items, false),
@@ -208,6 +211,9 @@ defmodule ExOutlines.Spec.Schema do
       max_length: Map.get(spec, :max_length),
       min: Map.get(spec, :min),
       max: Map.get(spec, :max),
+      exclusive_min: Map.get(spec, :exclusive_min),
+      exclusive_max: Map.get(spec, :exclusive_max),
+      multiple_of: Map.get(spec, :multiple_of),
       min_items: Map.get(spec, :min_items),
       max_items: Map.get(spec, :max_items),
       unique_items: Map.get(spec, :unique_items, false),
@@ -342,6 +348,24 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base =
+        case Map.get(spec, :exclusive_min) do
+          nil -> base
+          ex_min -> Map.put(base, :exclusiveMinimum, ex_min)
+        end
+
+      base =
+        case Map.get(spec, :exclusive_max) do
+          nil -> base
+          ex_max -> Map.put(base, :exclusiveMaximum, ex_max)
+        end
+
+      base =
+        case Map.get(spec, :multiple_of) do
+          nil -> base
+          mult -> Map.put(base, :multipleOf, mult)
+        end
+
       add_description(base, spec)
     end
 
@@ -363,6 +387,24 @@ defmodule ExOutlines.Spec.Schema do
         case Map.get(spec, :max) do
           nil -> base
           max -> Map.put(base, :maximum, max)
+        end
+
+      base =
+        case Map.get(spec, :exclusive_min) do
+          nil -> base
+          ex_min -> Map.put(base, :exclusiveMinimum, ex_min)
+        end
+
+      base =
+        case Map.get(spec, :exclusive_max) do
+          nil -> base
+          ex_max -> Map.put(base, :exclusiveMaximum, ex_max)
+        end
+
+      base =
+        case Map.get(spec, :multiple_of) do
+          nil -> base
+          mult -> Map.put(base, :multipleOf, mult)
         end
 
       add_description(base, spec)
@@ -439,6 +481,25 @@ defmodule ExOutlines.Spec.Schema do
       add_description(base, spec)
     end
 
+    defp add_exclusive_and_multiple(base, spec) do
+      base =
+        case Map.get(spec, :exclusive_min) do
+          nil -> base
+          ex_min -> Map.put(base, :exclusiveMinimum, ex_min)
+        end
+
+      base =
+        case Map.get(spec, :exclusive_max) do
+          nil -> base
+          ex_max -> Map.put(base, :exclusiveMaximum, ex_max)
+        end
+
+      case Map.get(spec, :multiple_of) do
+        nil -> base
+        mult -> Map.put(base, :multipleOf, mult)
+      end
+    end
+
     defp item_spec_to_json_schema(%{type: :string} = spec) do
       base = %{type: "string"}
 
@@ -478,6 +539,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base = add_exclusive_and_multiple(base, spec)
       base
     end
 
@@ -496,6 +558,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base = add_exclusive_and_multiple(base, spec)
       base
     end
 
@@ -847,6 +910,9 @@ defmodule ExOutlines.Spec.Schema do
 
       errors = errors ++ validate_min_constraint(name, min_value, value, use_positive_message)
       errors = errors ++ validate_max_constraint(name, Map.get(spec, :max), value)
+      errors = errors ++ validate_exclusive_min(name, Map.get(spec, :exclusive_min), value)
+      errors = errors ++ validate_exclusive_max(name, Map.get(spec, :exclusive_max), value)
+      errors = errors ++ validate_multiple_of(name, Map.get(spec, :multiple_of), value)
 
       errors
     end
@@ -887,6 +953,56 @@ defmodule ExOutlines.Spec.Schema do
     end
 
     defp validate_max_constraint(_name, _max, _value), do: []
+
+    defp validate_exclusive_min(_name, nil, _value), do: []
+
+    defp validate_exclusive_min(name, ex_min, value) when value <= ex_min do
+      [
+        %{
+          field: to_string(name),
+          expected: "value > #{ex_min}",
+          got: value,
+          message: "Field '#{name}' must be greater than #{ex_min} (exclusive)"
+        }
+      ]
+    end
+
+    defp validate_exclusive_min(_name, _ex_min, _value), do: []
+
+    defp validate_exclusive_max(_name, nil, _value), do: []
+
+    defp validate_exclusive_max(name, ex_max, value) when value >= ex_max do
+      [
+        %{
+          field: to_string(name),
+          expected: "value < #{ex_max}",
+          got: value,
+          message: "Field '#{name}' must be less than #{ex_max} (exclusive)"
+        }
+      ]
+    end
+
+    defp validate_exclusive_max(_name, _ex_max, _value), do: []
+
+    defp validate_multiple_of(_name, nil, _value), do: []
+
+    defp validate_multiple_of(name, mult, value) do
+      # Use float-safe modulo check
+      remainder = if is_float(value) or is_float(mult), do: :math.fmod(value, mult), else: rem(value, mult)
+
+      if remainder == 0 or remainder == 0.0 do
+        []
+      else
+        [
+          %{
+            field: to_string(name),
+            expected: "multiple of #{mult}",
+            got: value,
+            message: "Field '#{name}' must be a multiple of #{mult}"
+          }
+        ]
+      end
+    end
 
     defp validate_number_constraints(name, spec, value) do
       errors = []
@@ -931,7 +1047,12 @@ defmodule ExOutlines.Spec.Schema do
             errors
         end
 
-      Enum.reverse(errors)
+      errors = Enum.reverse(errors)
+      errors = errors ++ validate_exclusive_min(name, Map.get(spec, :exclusive_min), value)
+      errors = errors ++ validate_exclusive_max(name, Map.get(spec, :exclusive_max), value)
+      errors = errors ++ validate_multiple_of(name, Map.get(spec, :multiple_of), value)
+
+      errors
     end
 
     defp validate_string_constraints(name, spec, value) do
