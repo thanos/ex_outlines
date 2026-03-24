@@ -1,8 +1,9 @@
 defmodule ExOutlines.TemplateTest do
   use ExUnit.Case, async: true
 
-  alias ExOutlines.Template
+  alias ExOutlines.Backend.Mock
   alias ExOutlines.Spec.Schema
+  alias ExOutlines.Template
 
   describe "render/2" do
     test "renders template with assigns" do
@@ -105,8 +106,8 @@ defmodule ExOutlines.TemplateTest do
 
       assert {:error, {:invalid_template, "not a tuple"}} =
                ExOutlines.generate(schema,
-                 backend: ExOutlines.Backend.Mock,
-                 backend_opts: [mock: ExOutlines.Backend.Mock.new([])],
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([])],
                  template: "not a tuple"
                )
     end
@@ -116,8 +117,8 @@ defmodule ExOutlines.TemplateTest do
 
       assert {:error, {:invalid_template, {123, []}}} =
                ExOutlines.generate(schema,
-                 backend: ExOutlines.Backend.Mock,
-                 backend_opts: [mock: ExOutlines.Backend.Mock.new([])],
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([])],
                  template: {123, []}
                )
     end
@@ -127,8 +128,8 @@ defmodule ExOutlines.TemplateTest do
 
       assert {:error, {:invalid_template, {"<%= @x %>", %{x: 1}}}} =
                ExOutlines.generate(schema,
-                 backend: ExOutlines.Backend.Mock,
-                 backend_opts: [mock: ExOutlines.Backend.Mock.new([])],
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([])],
                  template: {"<%= @x %>", %{x: 1}}
                )
     end
@@ -136,8 +137,6 @@ defmodule ExOutlines.TemplateTest do
 
   describe "integration with ExOutlines.generate/2" do
     test "template option is passed through to generation" do
-      alias ExOutlines.Backend.Mock
-
       mock = Mock.new([{:ok, ~s({"name": "Alice"})}])
       schema = Schema.new(%{name: %{type: :string, required: true}})
       template = "Extract the name from: <%= @text %>"
@@ -153,8 +152,6 @@ defmodule ExOutlines.TemplateTest do
     end
 
     test "generation works without template (backward compatible)" do
-      alias ExOutlines.Backend.Mock
-
       mock = Mock.new([{:ok, ~s({"name": "Bob"})}])
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
