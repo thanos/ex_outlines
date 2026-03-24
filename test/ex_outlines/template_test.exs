@@ -40,8 +40,8 @@ defmodule ExOutlines.TemplateTest do
       assert result =~ "Negative: bad"
     end
 
-    test "returns empty string for missing assigns" do
-      # EEx returns empty/nil for missing assigns with a warning
+    test "does not raise when assigns are missing" do
+      # EEx emits a warning but does not raise for missing assigns
       result = Template.render("Hello, <%= @missing %>!", [])
       assert is_binary(result)
     end

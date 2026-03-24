@@ -22,8 +22,11 @@ defmodule ExOutlines.Spec.Schema do
   - `positive` - For integers, must be > 0 (optional, default: false)
   - `min_length` - For strings, minimum length in characters (optional)
   - `max_length` - For strings, maximum length in characters (optional)
-  - `min` - For integers/numbers, minimum value (optional)
-  - `max` - For integers/numbers, maximum value (optional)
+  - `min` - For integers/numbers, minimum value inclusive (optional)
+  - `max` - For integers/numbers, maximum value inclusive (optional)
+  - `exclusive_min` - For integers/numbers, exclusive minimum (value must be > this)
+  - `exclusive_max` - For integers/numbers, exclusive maximum (value must be < this)
+  - `multiple_of` - For integers/numbers, value must be a multiple of this (must be > 0)
   - `min_items` - For arrays, minimum number of items (optional)
   - `max_items` - For arrays, maximum number of items (optional)
   - `unique_items` - For arrays, whether items must be unique (default: false)
@@ -80,7 +83,10 @@ defmodule ExOutlines.Spec.Schema do
           min_length: non_neg_integer() | nil,
           max_length: pos_integer() | nil,
           min: number() | nil,
-          max: number() | nil
+          max: number() | nil,
+          exclusive_min: number() | nil,
+          exclusive_max: number() | nil,
+          multiple_of: number() | nil
         }
 
   @type field_type ::
@@ -95,6 +101,9 @@ defmodule ExOutlines.Spec.Schema do
           max_length: pos_integer() | nil,
           min: number() | nil,
           max: number() | nil,
+          exclusive_min: number() | nil,
+          exclusive_max: number() | nil,
+          multiple_of: number() | nil,
           min_items: non_neg_integer() | nil,
           max_items: pos_integer() | nil,
           unique_items: boolean(),
@@ -218,8 +227,10 @@ defmodule ExOutlines.Spec.Schema do
         pattern when is_binary(pattern) -> Regex.compile!(pattern)
       end
 
+    type = normalize_type(Map.fetch!(spec, :type))
+
     %{
-      type: Map.fetch!(spec, :type),
+      type: type,
       required: Map.get(spec, :required, false),
       description: Map.get(spec, :description),
       positive: Map.get(spec, :positive, false),
@@ -239,6 +250,45 @@ defmodule ExOutlines.Spec.Schema do
       length: Map.get(spec, :length),
       number: Map.get(spec, :number)
     }
+  end
+
+  defp normalize_type({:array, item_spec}) when is_map(item_spec) do
+    {:array, normalize_item_spec(item_spec)}
+  end
+
+  defp normalize_type(type), do: type
+
+  defp normalize_item_spec(spec) when is_map(spec) do
+    pattern =
+      case Map.get(spec, :pattern) do
+        nil -> nil
+        %Regex{} = regex -> regex
+        p when is_binary(p) -> Regex.compile!(p)
+      end
+
+    base = %{
+      type: Map.fetch!(spec, :type),
+      min_length: Map.get(spec, :min_length),
+      max_length: Map.get(spec, :max_length),
+      min: Map.get(spec, :min),
+      max: Map.get(spec, :max),
+      positive: Map.get(spec, :positive, false),
+      exclusive_min: validate_numeric_opt!(spec, :exclusive_min),
+      exclusive_max: validate_numeric_opt!(spec, :exclusive_max),
+      multiple_of: validate_positive_numeric_opt!(spec, :multiple_of),
+      pattern: pattern,
+      format: Map.get(spec, :format),
+      unique_items: Map.get(spec, :unique_items, false)
+    }
+
+    # Recursively normalize nested array item specs
+    case base.type do
+      {:array, nested} when is_map(nested) ->
+        %{base | type: {:array, normalize_item_spec(nested)}}
+
+      _ ->
+        base
+    end
   end
 
   # Get built-in regex pattern for a format type
@@ -970,7 +1020,8 @@ defmodule ExOutlines.Spec.Schema do
 
     defp validate_multiple_of(_name, nil, _value), do: []
 
-    defp validate_multiple_of(name, mult, value) when is_number(value) do
+    defp validate_multiple_of(name, mult, value)
+         when is_number(mult) and mult > 0 and is_number(value) do
       is_multiple =
         if is_float(value) or is_float(mult) do
           # Epsilon-based check for float rounding
@@ -993,6 +1044,9 @@ defmodule ExOutlines.Spec.Schema do
         ]
       end
     end
+
+    # Non-numeric or non-positive mult (defensive -- should be caught at normalization)
+    defp validate_multiple_of(_name, _mult, _value), do: []
 
     defp validate_number_constraints(name, spec, value) do
       errors = []

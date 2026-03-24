@@ -1018,6 +1018,85 @@ defmodule ExOutlines.Spec.SchemaTest do
     end
   end
 
+  describe "advanced numeric constraints in array items" do
+    test "exclusive_min/exclusive_max validated on integer array items" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, exclusive_min: 0, exclusive_max: 100}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"scores" => [1, 50, 99]})
+      assert result.scores == [1, 50, 99]
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"scores" => [0, 50]})
+      assert Enum.any?(diag.errors, &(&1.message =~ "greater than 0 (exclusive)"))
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"scores" => [50, 100]})
+      assert Enum.any?(diag.errors, &(&1.message =~ "less than 100 (exclusive)"))
+    end
+
+    test "multiple_of validated on integer array items" do
+      schema =
+        Schema.new(%{
+          multiples: %{type: {:array, %{type: :integer, multiple_of: 5}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"multiples" => [5, 10, 25]})
+      assert result.multiples == [5, 10, 25]
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"multiples" => [5, 7]})
+      assert Enum.any?(diag.errors, &(&1.message =~ "multiple of 5"))
+    end
+
+    test "exclusive_min/exclusive_max validated on number array items" do
+      schema =
+        Schema.new(%{
+          temps: %{type: {:array, %{type: :number, exclusive_min: 0.0, exclusive_max: 100.0}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"temps" => [0.1, 50.0, 99.9]})
+
+      assert {:error, _} = Spec.validate(schema, %{"temps" => [0.0]})
+      assert {:error, _} = Spec.validate(schema, %{"temps" => [100.0]})
+    end
+
+    test "multiple_of validated on number array items" do
+      schema =
+        Schema.new(%{
+          prices: %{type: {:array, %{type: :number, multiple_of: 0.25}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"prices" => [1.0, 2.25, 3.5]})
+      assert {:error, _} = Spec.validate(schema, %{"prices" => [1.3]})
+    end
+
+    test "JSON Schema includes exclusiveMinimum/multipleOf under array items" do
+      schema =
+        Schema.new(%{
+          values: %{
+            type: {:array, %{type: :integer, exclusive_min: 0, multiple_of: 10}}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      items_schema = json_schema.properties.values[:items]
+      assert items_schema[:exclusiveMinimum] == 0
+      assert items_schema[:multipleOf] == 10
+    end
+
+    test "raises on invalid multiple_of in array item spec" do
+      assert_raise ArgumentError, ~r/multiple_of must be a positive number/, fn ->
+        Schema.new(%{values: %{type: {:array, %{type: :integer, multiple_of: 0}}}})
+      end
+    end
+
+    test "raises on non-numeric exclusive_min in array item spec" do
+      assert_raise ArgumentError, ~r/exclusive_min must be a number/, fn ->
+        Schema.new(%{values: %{type: {:array, %{type: :integer, exclusive_min: "bad"}}}})
+      end
+    end
+  end
+
   describe "array validation" do
     test "validates array of strings" do
       schema =
