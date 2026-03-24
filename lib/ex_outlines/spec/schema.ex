@@ -348,24 +348,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
-      base =
-        case Map.get(spec, :exclusive_min) do
-          nil -> base
-          ex_min -> Map.put(base, :exclusiveMinimum, ex_min)
-        end
-
-      base =
-        case Map.get(spec, :exclusive_max) do
-          nil -> base
-          ex_max -> Map.put(base, :exclusiveMaximum, ex_max)
-        end
-
-      base =
-        case Map.get(spec, :multiple_of) do
-          nil -> base
-          mult -> Map.put(base, :multipleOf, mult)
-        end
-
+      base = add_exclusive_and_multiple(base, spec)
       add_description(base, spec)
     end
 
@@ -389,24 +372,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
-      base =
-        case Map.get(spec, :exclusive_min) do
-          nil -> base
-          ex_min -> Map.put(base, :exclusiveMinimum, ex_min)
-        end
-
-      base =
-        case Map.get(spec, :exclusive_max) do
-          nil -> base
-          ex_max -> Map.put(base, :exclusiveMaximum, ex_max)
-        end
-
-      base =
-        case Map.get(spec, :multiple_of) do
-          nil -> base
-          mult -> Map.put(base, :multipleOf, mult)
-        end
-
+      base = add_exclusive_and_multiple(base, spec)
       add_description(base, spec)
     end
 
@@ -956,7 +922,8 @@ defmodule ExOutlines.Spec.Schema do
 
     defp validate_exclusive_min(_name, nil, _value), do: []
 
-    defp validate_exclusive_min(name, ex_min, value) when value <= ex_min do
+    defp validate_exclusive_min(name, ex_min, value)
+         when is_number(ex_min) and is_number(value) and value <= ex_min do
       [
         %{
           field: to_string(name),
@@ -971,7 +938,8 @@ defmodule ExOutlines.Spec.Schema do
 
     defp validate_exclusive_max(_name, nil, _value), do: []
 
-    defp validate_exclusive_max(name, ex_max, value) when value >= ex_max do
+    defp validate_exclusive_max(name, ex_max, value)
+         when is_number(ex_max) and is_number(value) and value >= ex_max do
       [
         %{
           field: to_string(name),
@@ -985,12 +953,19 @@ defmodule ExOutlines.Spec.Schema do
     defp validate_exclusive_max(_name, _ex_max, _value), do: []
 
     defp validate_multiple_of(_name, nil, _value), do: []
+    defp validate_multiple_of(_name, mult, _value) when not is_number(mult) or mult <= 0, do: []
 
-    defp validate_multiple_of(name, mult, value) do
-      # Use float-safe modulo check
-      remainder = if is_float(value) or is_float(mult), do: :math.fmod(value, mult), else: rem(value, mult)
+    defp validate_multiple_of(name, mult, value) when is_number(value) do
+      is_multiple =
+        if is_float(value) or is_float(mult) do
+          # Epsilon-based check for float rounding
+          remainder = :math.fmod(value, mult)
+          abs(remainder) < 1.0e-9 or abs(abs(remainder) - abs(mult)) < 1.0e-9
+        else
+          rem(value, mult) == 0
+        end
 
-      if remainder == 0 or remainder == 0.0 do
+      if is_multiple do
         []
       else
         [
@@ -1003,6 +978,8 @@ defmodule ExOutlines.Spec.Schema do
         ]
       end
     end
+
+    defp validate_multiple_of(_name, _mult, _value), do: []
 
     defp validate_number_constraints(name, spec, value) do
       errors = []

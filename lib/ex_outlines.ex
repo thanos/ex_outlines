@@ -43,6 +43,7 @@ defmodule ExOutlines do
   - `{:error, {:backend_exception, error}}` - Backend raised an exception
   - `{:error, :no_backend}` - No backend specified
   - `{:error, {:invalid_backend, value}}` - Backend is not an atom
+  - `{:error, {:invalid_template, value}}` - Template is not `{binary, keyword}` or `nil`
   """
   @spec generate(ExOutlines.Spec.t(), generate_opts()) :: generate_result()
   def generate(spec, opts \\ []) do
@@ -153,24 +154,30 @@ defmodule ExOutlines do
     telemetry_metadata = Keyword.get(opts, :telemetry_metadata, %{})
     template = Keyword.get(opts, :template)
 
-    case backend do
-      nil ->
-        {:error, :no_backend}
-
-      backend when is_atom(backend) ->
-        {:ok,
-         %{
-           backend: backend,
-           backend_opts: backend_opts,
-           max_retries: max_retries,
-           telemetry_metadata: telemetry_metadata,
-           template: template
-         }}
-
-      _ ->
-        {:error, {:invalid_backend, backend}}
+    with :ok <- validate_backend(backend),
+         :ok <- validate_template(template) do
+      {:ok,
+       %{
+         backend: backend,
+         backend_opts: backend_opts,
+         max_retries: max_retries,
+         telemetry_metadata: telemetry_metadata,
+         template: template
+       }}
     end
   end
+
+  defp validate_backend(nil), do: {:error, :no_backend}
+  defp validate_backend(backend) when is_atom(backend), do: :ok
+  defp validate_backend(other), do: {:error, {:invalid_backend, other}}
+
+  defp validate_template(nil), do: :ok
+
+  defp validate_template({template, assigns})
+       when is_binary(template) and is_list(assigns),
+       do: :ok
+
+  defp validate_template(other), do: {:error, {:invalid_template, other}}
 
   defp execute_generation(spec, config) do
     %{
@@ -219,7 +226,15 @@ defmodule ExOutlines do
     {:error, :max_retries_exceeded}
   end
 
-  defp generation_loop(spec, backend, backend_opts, max_retries, attempt, previous_messages, template) do
+  defp generation_loop(
+         spec,
+         backend,
+         backend_opts,
+         max_retries,
+         attempt,
+         previous_messages,
+         template
+       ) do
     :telemetry.execute(
       [:ex_outlines, :attempt, :start],
       %{attempt: attempt},
@@ -250,7 +265,8 @@ defmodule ExOutlines do
 
   defp build_initial_messages(spec, nil), do: ExOutlines.Prompt.build_initial(spec)
 
-  defp build_initial_messages(spec, {template, assigns}) when is_binary(template) and is_list(assigns) do
+  defp build_initial_messages(spec, {template, assigns})
+       when is_binary(template) and is_list(assigns) do
     ExOutlines.Template.build_messages(template, assigns, spec)
   end
 

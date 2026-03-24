@@ -5,6 +5,17 @@ defmodule ExOutlines.Template do
   Provides reusable, parameterized prompt templates using Elixir's built-in
   EEx templating engine. Templates can be defined as strings or loaded from files.
 
+  ## Security
+
+  EEx templates execute arbitrary Elixir code at render time. **Never pass
+  untrusted or user-supplied strings as the template itself.** Only the
+  `assigns` values are safe to populate from external input -- the template
+  source must always come from your own codebase (inline strings, checked-in
+  `.eex` files, or application config you control).
+
+  If you need to interpolate untrusted text into a prompt, pass it as an
+  assign and reference it with `<%= @variable %>` inside a trusted template.
+
   ## Examples
 
   ### Inline templates

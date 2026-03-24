@@ -99,6 +99,41 @@ defmodule ExOutlines.TemplateTest do
     end
   end
 
+  describe "generate/2 template validation" do
+    test "rejects invalid template option (bare string)" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:invalid_template, "not a tuple"}} =
+               ExOutlines.generate(schema,
+                 backend: ExOutlines.Backend.Mock,
+                 backend_opts: [mock: ExOutlines.Backend.Mock.new([])],
+                 template: "not a tuple"
+               )
+    end
+
+    test "rejects invalid template option (wrong tuple shape)" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:invalid_template, {123, []}}} =
+               ExOutlines.generate(schema,
+                 backend: ExOutlines.Backend.Mock,
+                 backend_opts: [mock: ExOutlines.Backend.Mock.new([])],
+                 template: {123, []}
+               )
+    end
+
+    test "rejects invalid template option (assigns not a list)" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:invalid_template, {"<%= @x %>", %{x: 1}}}} =
+               ExOutlines.generate(schema,
+                 backend: ExOutlines.Backend.Mock,
+                 backend_opts: [mock: ExOutlines.Backend.Mock.new([])],
+                 template: {"<%= @x %>", %{x: 1}}
+               )
+    end
+  end
+
   describe "integration with ExOutlines.generate/2" do
     test "template option is passed through to generation" do
       alias ExOutlines.Backend.Mock

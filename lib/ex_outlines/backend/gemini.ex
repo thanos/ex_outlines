@@ -87,7 +87,7 @@ defmodule ExOutlines.Backend.Gemini do
 
     body_map =
       if system_instruction do
-        Map.put(body_map, :system_instruction, %{parts: [%{text: system_instruction}]})
+        Map.put(body_map, :systemInstruction, %{parts: [%{text: system_instruction}]})
       else
         body_map
       end
@@ -122,7 +122,8 @@ defmodule ExOutlines.Backend.Gemini do
     :inets.start()
     :ssl.start()
 
-    url = "#{@api_base_url}/#{config.model}:generateContent?key=#{config.api_key}"
+    query = URI.encode_query(%{"key" => config.api_key})
+    url = "#{@api_base_url}/#{URI.encode(config.model)}:generateContent?#{query}"
 
     headers = [
       {~c"content-type", ~c"application/json"}
@@ -135,7 +136,9 @@ defmodule ExOutlines.Backend.Gemini do
         customize_hostname_check: [
           match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
         ]
-      ]
+      ],
+      timeout: 60_000,
+      connect_timeout: 10_000
     ]
 
     request = {
