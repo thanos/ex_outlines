@@ -10,7 +10,7 @@ defmodule ExOutlines do
           backend_opts: keyword(),
           max_retries: pos_integer(),
           telemetry_metadata: map(),
-          template: {String.t(), keyword()}
+          template: nil | {String.t(), keyword()}
         ]
 
   @type generate_result :: {:ok, any()} | {:error, term()}
@@ -174,8 +174,13 @@ defmodule ExOutlines do
   defp validate_template(nil), do: :ok
 
   defp validate_template({template, assigns})
-       when is_binary(template) and is_list(assigns),
-       do: :ok
+       when is_binary(template) and is_list(assigns) do
+    if Keyword.keyword?(assigns) do
+      :ok
+    else
+      {:error, {:invalid_template, {template, assigns}}}
+    end
+  end
 
   defp validate_template(other), do: {:error, {:invalid_template, other}}
 

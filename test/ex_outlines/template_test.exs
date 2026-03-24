@@ -45,6 +45,12 @@ defmodule ExOutlines.TemplateTest do
       result = Template.render("Hello, <%= @missing %>!", [])
       assert is_binary(result)
     end
+
+    test "raises on non-keyword list assigns" do
+      assert_raise ArgumentError, ~r/assigns must be a keyword list/, fn ->
+        Template.render("Hello", [1, 2, 3])
+      end
+    end
   end
 
   describe "render_file/2" do
@@ -52,16 +58,15 @@ defmodule ExOutlines.TemplateTest do
       dir = System.tmp_dir!()
       path = Path.join(dir, "test_template_#{System.unique_integer([:positive])}.eex")
 
-      on_cleanup = fn -> File.rm(path) end
+      on_exit(fn -> File.rm(path) end)
 
-      %{path: path, cleanup: on_cleanup}
+      %{path: path}
     end
 
-    test "renders template from file", %{path: path, cleanup: cleanup} do
+    test "renders template from file", %{path: path} do
       File.write!(path, "Hello, <%= @name %>!")
       result = Template.render_file(path, name: "File")
       assert result == "Hello, File!"
-      cleanup.()
     end
 
     test "raises on missing file" do
@@ -131,6 +136,17 @@ defmodule ExOutlines.TemplateTest do
                  backend: Mock,
                  backend_opts: [mock: Mock.new([])],
                  template: {"<%= @x %>", %{x: 1}}
+               )
+    end
+
+    test "rejects invalid template option (non-keyword list assigns)" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:invalid_template, {"<%= @x %>", [1, 2]}}} =
+               ExOutlines.generate(schema,
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([])],
+                 template: {"<%= @x %>", [1, 2]}
                )
     end
   end

@@ -63,6 +63,11 @@ defmodule ExOutlines.Template do
   """
   @spec render(String.t(), keyword()) :: String.t()
   def render(template, assigns \\ []) when is_binary(template) do
+    unless Keyword.keyword?(assigns) do
+      raise ArgumentError,
+            "assigns must be a keyword list, got: #{inspect(assigns)}"
+    end
+
     EEx.eval_string(template, assigns: assigns)
   end
 
@@ -80,6 +85,11 @@ defmodule ExOutlines.Template do
   """
   @spec render_file(Path.t(), keyword()) :: String.t()
   def render_file(path, assigns \\ []) when is_binary(path) do
+    unless Keyword.keyword?(assigns) do
+      raise ArgumentError,
+            "assigns must be a keyword list, got: #{inspect(assigns)}"
+    end
+
     EEx.eval_file(path, assigns: assigns)
   end
 
