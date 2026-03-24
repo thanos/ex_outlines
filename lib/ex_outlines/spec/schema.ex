@@ -979,8 +979,6 @@ defmodule ExOutlines.Spec.Schema do
       end
     end
 
-    defp validate_multiple_of(_name, _mult, _value), do: []
-
     defp validate_number_constraints(name, spec, value) do
       errors = []
 
