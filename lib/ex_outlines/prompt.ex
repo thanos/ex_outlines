@@ -72,6 +72,36 @@ defmodule ExOutlines.Prompt do
   end
 
   @doc """
+  Build initial generation prompt with multimodal content parts.
+
+  The content parts (images, text) are included alongside the schema
+  instructions in the user message. The system message remains text-only.
+  """
+  @spec build_initial_with_content(ExOutlines.Spec.t(), [ExOutlines.Backend.content_part()]) ::
+          [ExOutlines.Backend.message()]
+  def build_initial_with_content(spec, content_parts) when is_list(content_parts) do
+    schema_json =
+      spec
+      |> ExOutlines.Spec.to_schema()
+      |> Jason.encode!(pretty: true)
+
+    schema_text = """
+    Generate JSON output conforming to this schema:
+
+    #{schema_json}
+
+    Respond with valid JSON only.
+    """
+
+    user_content = content_parts ++ [%{type: :text, text: String.trim(schema_text)}]
+
+    [
+      %{role: "system", content: String.trim(system_content())},
+      %{role: "user", content: user_content}
+    ]
+  end
+
+  @doc """
   Build repair prompt from previous attempt and diagnostics.
 
   Creates messages showing the validation failure and requesting correction.
