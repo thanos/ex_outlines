@@ -91,6 +91,7 @@ defmodule ExOutlines.Spec.Schema do
 
   @type item_spec :: %{
           type: item_type(),
+          positive: boolean(),
           min_length: non_neg_integer() | nil,
           max_length: pos_integer() | nil,
           min: number() | nil,

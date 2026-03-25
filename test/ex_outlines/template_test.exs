@@ -149,6 +149,30 @@ defmodule ExOutlines.TemplateTest do
                  template: {"<%= @x %>", [1, 2]}
                )
     end
+
+    test "returns template_error for invalid EEx syntax" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      result =
+        ExOutlines.generate(schema,
+          backend: Mock,
+          backend_opts: [mock: Mock.new([{:ok, ~s({"name": "x"})}])],
+          template: {"<%= if true %>", []}
+        )
+
+      assert {:error, {:template_error, _}} = result
+    end
+
+    test "returns template_error for runtime error in template" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:template_error, %ArithmeticError{}}} =
+               ExOutlines.generate(schema,
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([{:ok, ~s({"name": "x"})}])],
+                 template: {"<%= 1 / 0 %>", []}
+               )
+    end
   end
 
   describe "integration with ExOutlines.generate/2" do

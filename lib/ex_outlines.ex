@@ -48,6 +48,7 @@ defmodule ExOutlines do
   - `{:error, :no_backend}` - No backend specified
   - `{:error, {:invalid_backend, value}}` - Backend is not an atom
   - `{:error, {:invalid_template, value}}` - Template is not `{binary, keyword}` or `nil`
+  - `{:error, {:template_error, exception}}` - Template rendering failed (syntax error, runtime error)
   """
   @spec generate(ExOutlines.Spec.t(), generate_opts()) :: generate_result()
   def generate(spec, opts \\ []) do
@@ -249,26 +250,31 @@ defmodule ExOutlines do
       %{spec: spec}
     )
 
-    messages =
-      if attempt == 0 do
-        build_initial_messages(spec, ctx.template)
-      else
-        previous_messages
+    with {:ok, messages} <- resolve_messages(spec, ctx.template, attempt, previous_messages) do
+      case call_backend(ctx.backend, messages, ctx.backend_opts) do
+        {:ok, response} ->
+          process_response(spec, response, ctx, attempt, messages)
+
+        {:error, reason} ->
+          :telemetry.execute(
+            [:ex_outlines, :attempt, :backend_error],
+            %{attempt: attempt},
+            %{reason: reason}
+          )
+
+          {:error, {:backend_error, reason}}
       end
-
-    case call_backend(ctx.backend, messages, ctx.backend_opts) do
-      {:ok, response} ->
-        process_response(spec, response, ctx, attempt, messages)
-
-      {:error, reason} ->
-        :telemetry.execute(
-          [:ex_outlines, :attempt, :backend_error],
-          %{attempt: attempt},
-          %{reason: reason}
-        )
-
-        {:error, {:backend_error, reason}}
     end
+  end
+
+  defp resolve_messages(_spec, _template, attempt, previous_messages) when attempt > 0 do
+    {:ok, previous_messages}
+  end
+
+  defp resolve_messages(spec, template, 0, _previous_messages) do
+    {:ok, build_initial_messages(spec, template)}
+  rescue
+    error -> {:error, {:template_error, error}}
   end
 
   defp build_initial_messages(spec, nil), do: ExOutlines.Prompt.build_initial(spec)
