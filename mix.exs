@@ -194,7 +194,7 @@ defmodule ExOutlines.MixProject do
     ]
 
     Enum.each(steps, fn {task, env} ->
-      Mix.shell().info([:bright, "==> mix #{task}", :reset])
+      Mix.shell().info(IO.ANSI.format([:bright, "==> mix #{task}", :reset]))
 
       {_, exit_code} =
         System.cmd("mix", String.split(task),
@@ -207,6 +207,6 @@ defmodule ExOutlines.MixProject do
       end
     end)
 
-    Mix.shell().info([:green, :bright, "\nAll verification checks passed!", :reset])
+    Mix.shell().info(IO.ANSI.format([:green, :bright, "\nAll verification checks passed!", :reset]))
   end
 end

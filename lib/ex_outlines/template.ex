@@ -58,7 +58,7 @@ defmodule ExOutlines.Template do
       iex> ExOutlines.Template.render("Hello, <%= @name %>!", name: "World")
       "Hello, World!"
 
-      iex> ExOutlines.Template.render("Items: <%= Enum.join(@items, ", ") %>", items: ["a", "b"])
+      iex> ExOutlines.Template.render(~s(Items: <%= Enum.join(@items, ", ") %>), items: ["a", "b"])
       "Items: a, b"
   """
   @spec render(String.t(), keyword()) :: String.t()
