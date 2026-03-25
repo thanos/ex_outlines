@@ -199,7 +199,8 @@ defmodule ExOutlines.MixProject do
       {_, exit_code} =
         System.cmd("mix", String.split(task),
           env: [{"MIX_ENV", to_string(env)}],
-          into: IO.stream()
+          into: IO.stream(:stdio, :line),
+          stderr_to_stdout: true
         )
 
       if exit_code != 0 do
