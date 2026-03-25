@@ -29,6 +29,12 @@ defmodule ExOutlines.MixProject do
         plt_add_apps: [:ex_unit],
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
         flags: [:error_handling, :underspecs]
+      ],
+      aliases: [
+        setup: ["deps.get"],
+        lint: ["format --check-formatted", "credo --strict", "dialyzer"],
+        precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"],
+        verify: &verify/1
       ]
     ]
   end
@@ -174,5 +180,34 @@ defmodule ExOutlines.MixProject do
         ExOutlines.Ecto.SchemaAdapter
       ]
     ]
+  end
+
+  defp verify(_) do
+    steps = [
+      {"compile --warnings-as-errors", :dev},
+      {"format --check-formatted", :dev},
+      {"credo --strict", :dev},
+      # {"sobelow --config", :dev},
+      {"dialyzer", :dev},
+      {"test --cover", :test},
+      {"docs --warnings-as-errors", :dev}
+    ]
+
+    Enum.each(steps, fn {task, env} ->
+      Mix.shell().info(IO.ANSI.format([:bright, "==> mix #{task}", :reset]))
+
+      {_, exit_code} =
+        System.cmd("mix", String.split(task),
+          env: [{"MIX_ENV", to_string(env)}],
+          into: IO.stream(:stdio, :line),
+          stderr_to_stdout: true
+        )
+
+      if exit_code != 0 do
+        Mix.raise("mix #{task} failed (exit code #{exit_code})")
+      end
+    end)
+
+    Mix.shell().info(IO.ANSI.format([:green, :bright, "\nAll verification checks passed!", :reset]))
   end
 end
