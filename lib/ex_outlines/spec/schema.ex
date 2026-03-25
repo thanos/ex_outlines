@@ -1042,9 +1042,9 @@ defmodule ExOutlines.Spec.Schema do
          when is_number(mult) and mult > 0 and is_number(value) do
       is_multiple =
         if is_float(value) or is_float(mult) do
-          # Epsilon-based check for float rounding
-          remainder = :math.fmod(value, mult)
-          abs(remainder) < 1.0e-9 or abs(abs(remainder) - abs(mult)) < 1.0e-9
+          # Coerce to float for :math.fmod/2 which requires float arguments
+          remainder = :math.fmod(value / 1, mult / 1)
+          abs(remainder) < 1.0e-9 or abs(abs(remainder) - abs(mult / 1)) < 1.0e-9
         else
           rem(value, mult) == 0
         end

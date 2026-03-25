@@ -998,6 +998,19 @@ defmodule ExOutlines.Spec.SchemaTest do
       assert hd(diag.errors).message =~ "multiple of 0.25"
     end
 
+    test "validates integer value with float multiple_of" do
+      schema = Schema.new(%{halves: %{type: :number, multiple_of: 0.5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"halves" => 3})
+      assert result.halves == 3
+
+      assert {:ok, result} = Spec.validate(schema, %{"halves" => 2.5})
+      assert result.halves == 2.5
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"halves" => 3.3})
+      assert hd(diag.errors).message =~ "multiple of 0.5"
+    end
+
     test "JSON Schema includes multipleOf" do
       schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
 

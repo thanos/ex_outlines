@@ -17,7 +17,14 @@ defmodule ExOutlines.Prompt do
   (used by `ExOutlines.Template` for custom prompt content).
   """
   @spec build_initial(ExOutlines.Spec.t(), String.t() | nil) :: [message()]
-  def build_initial(spec, preamble \\ nil) do
+  def build_initial(spec, preamble \\ nil)
+
+  def build_initial(spec, nil), do: do_build_initial(spec, nil)
+
+  def build_initial(spec, preamble) when is_binary(preamble),
+    do: do_build_initial(spec, preamble)
+
+  defp do_build_initial(spec, preamble) do
     schema_json =
       spec
       |> ExOutlines.Spec.to_schema()
