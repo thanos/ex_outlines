@@ -78,15 +78,31 @@ defmodule ExOutlines.Spec.Schema do
 
   @type format :: :email | :url | :uuid | :phone | :date
 
+  @type item_type ::
+          :string
+          | :integer
+          | :boolean
+          | :number
+          | {:enum, [any()]}
+          | {:array, item_spec()}
+          | {:object, t()}
+          | {:union, [item_spec()]}
+          | :null
+
   @type item_spec :: %{
-          type: :string | :integer | :boolean | :number | {:enum, [any()]},
+          type: item_type(),
           min_length: non_neg_integer() | nil,
           max_length: pos_integer() | nil,
           min: number() | nil,
           max: number() | nil,
           exclusive_min: number() | nil,
           exclusive_max: number() | nil,
-          multiple_of: number() | nil
+          multiple_of: number() | nil,
+          min_items: non_neg_integer() | nil,
+          max_items: pos_integer() | nil,
+          unique_items: boolean(),
+          pattern: Regex.t() | nil,
+          format: format() | nil
         }
 
   @type field_type ::
@@ -276,9 +292,11 @@ defmodule ExOutlines.Spec.Schema do
       exclusive_min: validate_numeric_opt!(spec, :exclusive_min),
       exclusive_max: validate_numeric_opt!(spec, :exclusive_max),
       multiple_of: validate_positive_numeric_opt!(spec, :multiple_of),
+      min_items: Map.get(spec, :min_items),
+      max_items: Map.get(spec, :max_items),
+      unique_items: Map.get(spec, :unique_items, false),
       pattern: pattern,
-      format: Map.get(spec, :format),
-      unique_items: Map.get(spec, :unique_items, false)
+      format: Map.get(spec, :format)
     }
 
     # Recursively normalize nested array item specs
