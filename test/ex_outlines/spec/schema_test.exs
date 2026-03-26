@@ -1383,6 +1383,183 @@ defmodule ExOutlines.Spec.SchemaTest do
     end
   end
 
+  describe "tuple type validation" do
+    test "validates tuple with correct length and types" do
+      schema =
+        Schema.new(%{
+          point: %{type: {:tuple, [%{type: :number}, %{type: :number}]}, required: true}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"point" => [1.5, 2.5]})
+      assert result.point == [1.5, 2.5]
+    end
+
+    test "rejects tuple with wrong length" do
+      schema =
+        Schema.new(%{
+          point: %{type: {:tuple, [%{type: :number}, %{type: :number}]}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"point" => [1.0]})
+      assert hd(diag.errors).message =~ "exactly 2 elements, got 1"
+
+      assert {:error, diag} = Spec.validate(schema, %{"point" => [1.0, 2.0, 3.0]})
+      assert hd(diag.errors).message =~ "exactly 2 elements, got 3"
+    end
+
+    test "validates different types at each position" do
+      schema =
+        Schema.new(%{
+          entry: %{type: {:tuple, [%{type: :string}, %{type: :integer}, %{type: :boolean}]}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"entry" => ["Alice", 30, true]})
+      assert result.entry == ["Alice", 30, true]
+    end
+
+    test "rejects wrong type at specific position" do
+      schema =
+        Schema.new(%{
+          entry: %{type: {:tuple, [%{type: :string}, %{type: :integer}]}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"entry" => ["Alice", "not_int"]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "integer"))
+    end
+
+    test "rejects non-array value" do
+      schema =
+        Schema.new(%{
+          point: %{type: {:tuple, [%{type: :number}, %{type: :number}]}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"point" => "not array"})
+      assert hd(diag.errors).message =~ "must be an array (tuple)"
+    end
+
+    test "JSON Schema includes prefixItems and items: false" do
+      schema =
+        Schema.new(%{
+          coord: %{type: {:tuple, [%{type: :number}, %{type: :number}, %{type: :string}]}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      coord_schema = json_schema.properties.coord
+
+      assert coord_schema[:type] == "array"
+      assert coord_schema[:items] == false
+      assert coord_schema[:minItems] == 3
+      assert coord_schema[:maxItems] == 3
+
+      assert [
+               %{type: "number"},
+               %{type: "number"},
+               %{type: "string"}
+             ] = coord_schema[:prefixItems]
+    end
+
+    test "normalizes item specs in tuple type" do
+      # Ensures constraint validation works on tuple item specs
+      assert_raise ArgumentError, ~r/multiple_of must be a positive number/, fn ->
+        Schema.new(%{bad: %{type: {:tuple, [%{type: :integer, multiple_of: 0}]}}})
+      end
+    end
+  end
+
+  describe "conditional fields (depends_on)" do
+    test "conditionally required field is required when condition is met" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      # When type is "company", registration_number is required
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"type" => "company"})
+
+      assert Enum.any?(diag.errors, &(&1.field == "registration_number"))
+    end
+
+    test "conditionally required field is optional when condition is not met" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      # When type is "person", registration_number is not required
+      assert {:ok, result} = Spec.validate(schema, %{"type" => "person"})
+      assert result.type == "person"
+    end
+
+    test "conditionally required field passes when provided" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      assert {:ok, result} =
+               Spec.validate(schema, %{
+                 "type" => "company",
+                 "registration_number" => "ABC123"
+               })
+
+      assert result.type == "company"
+      assert result.registration_number == "ABC123"
+    end
+
+    test "static required + depends_on: static required always applies" do
+      schema =
+        Schema.new(%{
+          type: %{type: :string, required: true},
+          name: %{type: :string, required: true, depends_on: %{field: :type, equals: "x"}}
+        })
+
+      # name is statically required, so it's always required regardless of depends_on
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"type" => "other"})
+
+      assert Enum.any?(diag.errors, &(&1.field == "name"))
+    end
+
+    test "JSON Schema includes if/then blocks" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          reg_num: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      assert [conditional] = json_schema[:allOf]
+      assert conditional["if"][:properties][:type] == %{const: "company"}
+      assert conditional["then"][:required] == ["reg_num"]
+    end
+
+    test "no allOf when no conditional fields" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      json_schema = Spec.to_schema(schema)
+      refute Map.has_key?(json_schema, :allOf)
+    end
+  end
+
   describe "nested object validation" do
     test "validates nested object (1 level)" do
       address_schema =

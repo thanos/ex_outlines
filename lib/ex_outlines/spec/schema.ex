@@ -12,6 +12,7 @@ defmodule ExOutlines.Spec.Schema do
   - `:number` - Numeric values (integer or float)
   - `{:enum, values}` - Enumerated values from a list
   - `{:array, item_spec}` - Array/list of items with validation
+  - `{:tuple, [item_spec]}` - Fixed-length array with positional type validation
 
   ## Field Specification
 
@@ -32,6 +33,8 @@ defmodule ExOutlines.Spec.Schema do
   - `unique_items` - For arrays, whether items must be unique (default: false)
   - `pattern` - For strings, custom regex pattern (Regex.t() or string)
   - `format` - For strings, built-in format (:email, :url, :uuid, :phone, :date)
+  - `depends_on` - Conditional requirement: `%{field: atom, equals: value}`.
+    When the named field equals the given value, this field becomes required.
 
   ## Example
 
@@ -107,7 +110,13 @@ defmodule ExOutlines.Spec.Schema do
         }
 
   @type field_type ::
-          :string | :integer | :boolean | :number | {:enum, [any()]} | {:array, item_spec()}
+          :string
+          | :integer
+          | :boolean
+          | :number
+          | {:enum, [any()]}
+          | {:array, item_spec()}
+          | {:tuple, [item_spec()]}
 
   @type field_spec :: %{
           type: field_type(),
@@ -124,7 +133,8 @@ defmodule ExOutlines.Spec.Schema do
           min_items: non_neg_integer() | nil,
           max_items: pos_integer() | nil,
           unique_items: boolean(),
-          pattern: Regex.t() | nil
+          pattern: Regex.t() | nil,
+          depends_on: %{field: atom(), equals: any()} | nil
         }
 
   @type t :: %__MODULE__{
@@ -183,7 +193,8 @@ defmodule ExOutlines.Spec.Schema do
       max_items: Keyword.get(opts, :max_items),
       unique_items: Keyword.get(opts, :unique_items, false),
       pattern: Keyword.get(opts, :pattern),
-      format: Keyword.get(opts, :format)
+      format: Keyword.get(opts, :format),
+      depends_on: Keyword.get(opts, :depends_on)
     }
 
     %{schema | fields: Map.put(fields, name, normalize_field_spec(field_spec))}
@@ -263,6 +274,7 @@ defmodule ExOutlines.Spec.Schema do
       unique_items: Map.get(spec, :unique_items, false),
       pattern: pattern,
       format: Map.get(spec, :format),
+      depends_on: Map.get(spec, :depends_on),
       # Preserve Ecto-style DSL fields for optional Ecto integration
       length: Map.get(spec, :length),
       number: Map.get(spec, :number)
@@ -271,6 +283,10 @@ defmodule ExOutlines.Spec.Schema do
 
   defp normalize_type({:array, item_spec}) when is_map(item_spec) do
     {:array, normalize_item_spec(item_spec)}
+  end
+
+  defp normalize_type({:tuple, type_specs}) when is_list(type_specs) do
+    {:tuple, Enum.map(type_specs, &normalize_item_spec/1)}
   end
 
   defp normalize_type(type), do: type
@@ -341,11 +357,39 @@ defmodule ExOutlines.Spec.Schema do
         properties: properties
       }
 
-      if required_fields == [] do
+      schema =
+        if required_fields == [] do
+          schema
+        else
+          Map.put(schema, :required, required_fields)
+        end
+
+      # Add if/then blocks for conditional fields
+      conditionals = build_conditionals(fields)
+
+      if conditionals == [] do
         schema
       else
-        Map.put(schema, :required, required_fields)
+        Map.put(schema, :allOf, conditionals)
       end
+    end
+
+    defp build_conditionals(fields) do
+      fields
+      |> Enum.filter(fn {_name, spec} -> Map.get(spec, :depends_on) != nil end)
+      |> Enum.map(fn {name, spec} ->
+        %{field: dep_field, equals: dep_value} = spec.depends_on
+
+        %{
+          "if" => %{
+            properties: %{dep_field => %{const: dep_value}},
+            required: [to_string(dep_field)]
+          },
+          "then" => %{
+            required: [to_string(name)]
+          }
+        }
+      end)
     end
 
     @doc """
@@ -490,6 +534,20 @@ defmodule ExOutlines.Spec.Schema do
         else
           base
         end
+
+      add_description(base, spec)
+    end
+
+    defp field_to_json_schema(%{type: {:tuple, type_specs}} = spec) when is_list(type_specs) do
+      prefix_items = Enum.map(type_specs, &item_spec_to_json_schema/1)
+
+      base = %{
+        type: "array",
+        prefixItems: prefix_items,
+        items: false,
+        minItems: length(type_specs),
+        maxItems: length(type_specs)
+      }
 
       add_description(base, spec)
     end
@@ -713,7 +771,7 @@ defmodule ExOutlines.Spec.Schema do
 
     defp validate_field(name, spec, value) do
       field_value = Map.get(value, name)
-      required = Map.get(spec, :required, false)
+      required = field_required?(spec, value)
 
       cond do
         # Missing required field
@@ -734,6 +792,22 @@ defmodule ExOutlines.Spec.Schema do
         # Field present - validate type
         true ->
           validate_field_type(name, spec, field_value)
+      end
+    end
+
+    defp field_required?(spec, value) do
+      static_required = Map.get(spec, :required, false)
+
+      case Map.get(spec, :depends_on) do
+        nil ->
+          static_required
+
+        %{field: dep_field, equals: dep_value} ->
+          actual = Map.get(value, dep_field) || Map.get(value, to_string(dep_field))
+          static_required or actual == dep_value
+
+        _ ->
+          static_required
       end
     end
 
@@ -850,6 +924,41 @@ defmodule ExOutlines.Spec.Schema do
           expected: "array",
           got: value,
           message: "Field '#{name}' must be an array"
+        }
+      ]
+    end
+
+    defp validate_field_type(name, %{type: {:tuple, type_specs}}, value)
+         when is_list(value) and is_list(type_specs) do
+      expected_len = length(type_specs)
+      actual_len = length(value)
+
+      if actual_len != expected_len do
+        [
+          %{
+            field: to_string(name),
+            expected: "tuple of #{expected_len} elements",
+            got: value,
+            message: "Field '#{name}' must have exactly #{expected_len} elements, got #{actual_len}"
+          }
+        ]
+      else
+        value
+        |> Enum.zip(type_specs)
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {{item, item_spec}, index} ->
+          validate_array_item(name, index, item_spec, item)
+        end)
+      end
+    end
+
+    defp validate_field_type(name, %{type: {:tuple, _}}, value) do
+      [
+        %{
+          field: to_string(name),
+          expected: "array (tuple)",
+          got: value,
+          message: "Field '#{name}' must be an array (tuple)"
         }
       ]
     end
