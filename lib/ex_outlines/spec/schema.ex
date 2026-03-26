@@ -22,8 +22,11 @@ defmodule ExOutlines.Spec.Schema do
   - `positive` - For integers, must be > 0 (optional, default: false)
   - `min_length` - For strings, minimum length in characters (optional)
   - `max_length` - For strings, maximum length in characters (optional)
-  - `min` - For integers/numbers, minimum value (optional)
-  - `max` - For integers/numbers, maximum value (optional)
+  - `min` - For integers/numbers, minimum value inclusive (optional)
+  - `max` - For integers/numbers, maximum value inclusive (optional)
+  - `exclusive_min` - For integers/numbers, exclusive minimum (value must be > this)
+  - `exclusive_max` - For integers/numbers, exclusive maximum (value must be < this)
+  - `multiple_of` - For integers/numbers, value must be a multiple of this (must be > 0)
   - `min_items` - For arrays, minimum number of items (optional)
   - `max_items` - For arrays, maximum number of items (optional)
   - `unique_items` - For arrays, whether items must be unique (default: false)
@@ -75,12 +78,32 @@ defmodule ExOutlines.Spec.Schema do
 
   @type format :: :email | :url | :uuid | :phone | :date
 
+  @type item_type ::
+          :string
+          | :integer
+          | :boolean
+          | :number
+          | {:enum, [any()]}
+          | {:array, item_spec()}
+          | {:object, t()}
+          | {:union, [item_spec()]}
+          | :null
+
   @type item_spec :: %{
-          type: :string | :integer | :boolean | :number | {:enum, [any()]},
+          type: item_type(),
+          positive: boolean(),
           min_length: non_neg_integer() | nil,
           max_length: pos_integer() | nil,
           min: number() | nil,
-          max: number() | nil
+          max: number() | nil,
+          exclusive_min: number() | nil,
+          exclusive_max: number() | nil,
+          multiple_of: number() | nil,
+          min_items: non_neg_integer() | nil,
+          max_items: pos_integer() | nil,
+          unique_items: boolean(),
+          pattern: Regex.t() | nil,
+          format: format() | nil
         }
 
   @type field_type ::
@@ -95,6 +118,9 @@ defmodule ExOutlines.Spec.Schema do
           max_length: pos_integer() | nil,
           min: number() | nil,
           max: number() | nil,
+          exclusive_min: number() | nil,
+          exclusive_max: number() | nil,
+          multiple_of: number() | nil,
           min_items: non_neg_integer() | nil,
           max_items: pos_integer() | nil,
           unique_items: boolean(),
@@ -150,6 +176,9 @@ defmodule ExOutlines.Spec.Schema do
       max_length: Keyword.get(opts, :max_length),
       min: Keyword.get(opts, :min),
       max: Keyword.get(opts, :max),
+      exclusive_min: Keyword.get(opts, :exclusive_min),
+      exclusive_max: Keyword.get(opts, :exclusive_max),
+      multiple_of: Keyword.get(opts, :multiple_of),
       min_items: Keyword.get(opts, :min_items),
       max_items: Keyword.get(opts, :max_items),
       unique_items: Keyword.get(opts, :unique_items, false),
@@ -182,6 +211,22 @@ defmodule ExOutlines.Spec.Schema do
 
   # Private helpers
 
+  defp validate_numeric_opt!(spec, key) do
+    case Map.get(spec, key) do
+      nil -> nil
+      value when is_number(value) -> value
+      other -> raise ArgumentError, "#{key} must be a number, got: #{inspect(other)}"
+    end
+  end
+
+  defp validate_positive_numeric_opt!(spec, key) do
+    case Map.get(spec, key) do
+      nil -> nil
+      value when is_number(value) and value > 0 -> value
+      other -> raise ArgumentError, "#{key} must be a positive number, got: #{inspect(other)}"
+    end
+  end
+
   defp normalize_field_spec(spec) when is_map(spec) do
     # If Ecto is available, normalize Ecto-style DSL first
     spec =
@@ -199,8 +244,10 @@ defmodule ExOutlines.Spec.Schema do
         pattern when is_binary(pattern) -> Regex.compile!(pattern)
       end
 
+    type = normalize_type(Map.fetch!(spec, :type))
+
     %{
-      type: Map.fetch!(spec, :type),
+      type: type,
       required: Map.get(spec, :required, false),
       description: Map.get(spec, :description),
       positive: Map.get(spec, :positive, false),
@@ -208,6 +255,9 @@ defmodule ExOutlines.Spec.Schema do
       max_length: Map.get(spec, :max_length),
       min: Map.get(spec, :min),
       max: Map.get(spec, :max),
+      exclusive_min: validate_numeric_opt!(spec, :exclusive_min),
+      exclusive_max: validate_numeric_opt!(spec, :exclusive_max),
+      multiple_of: validate_positive_numeric_opt!(spec, :multiple_of),
       min_items: Map.get(spec, :min_items),
       max_items: Map.get(spec, :max_items),
       unique_items: Map.get(spec, :unique_items, false),
@@ -217,6 +267,47 @@ defmodule ExOutlines.Spec.Schema do
       length: Map.get(spec, :length),
       number: Map.get(spec, :number)
     }
+  end
+
+  defp normalize_type({:array, item_spec}) when is_map(item_spec) do
+    {:array, normalize_item_spec(item_spec)}
+  end
+
+  defp normalize_type(type), do: type
+
+  defp normalize_item_spec(spec) when is_map(spec) do
+    pattern =
+      case Map.get(spec, :pattern) do
+        nil -> nil
+        %Regex{} = regex -> regex
+        p when is_binary(p) -> Regex.compile!(p)
+      end
+
+    base = %{
+      type: Map.fetch!(spec, :type),
+      min_length: Map.get(spec, :min_length),
+      max_length: Map.get(spec, :max_length),
+      min: Map.get(spec, :min),
+      max: Map.get(spec, :max),
+      positive: Map.get(spec, :positive, false),
+      exclusive_min: validate_numeric_opt!(spec, :exclusive_min),
+      exclusive_max: validate_numeric_opt!(spec, :exclusive_max),
+      multiple_of: validate_positive_numeric_opt!(spec, :multiple_of),
+      min_items: Map.get(spec, :min_items),
+      max_items: Map.get(spec, :max_items),
+      unique_items: Map.get(spec, :unique_items, false),
+      pattern: pattern,
+      format: Map.get(spec, :format)
+    }
+
+    # Recursively normalize nested array item specs
+    case base.type do
+      {:array, nested} when is_map(nested) ->
+        %{base | type: {:array, normalize_item_spec(nested)}}
+
+      _ ->
+        base
+    end
   end
 
   # Get built-in regex pattern for a format type
@@ -342,6 +433,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base = add_exclusive_and_multiple(base, spec)
       add_description(base, spec)
     end
 
@@ -365,6 +457,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base = add_exclusive_and_multiple(base, spec)
       add_description(base, spec)
     end
 
@@ -439,6 +532,25 @@ defmodule ExOutlines.Spec.Schema do
       add_description(base, spec)
     end
 
+    defp add_exclusive_and_multiple(base, spec) do
+      base =
+        case Map.get(spec, :exclusive_min) do
+          nil -> base
+          ex_min -> Map.put(base, :exclusiveMinimum, ex_min)
+        end
+
+      base =
+        case Map.get(spec, :exclusive_max) do
+          nil -> base
+          ex_max -> Map.put(base, :exclusiveMaximum, ex_max)
+        end
+
+      case Map.get(spec, :multiple_of) do
+        nil -> base
+        mult -> Map.put(base, :multipleOf, mult)
+      end
+    end
+
     defp item_spec_to_json_schema(%{type: :string} = spec) do
       base = %{type: "string"}
 
@@ -478,6 +590,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base = add_exclusive_and_multiple(base, spec)
       base
     end
 
@@ -496,6 +609,7 @@ defmodule ExOutlines.Spec.Schema do
           max -> Map.put(base, :maximum, max)
         end
 
+      base = add_exclusive_and_multiple(base, spec)
       base
     end
 
@@ -519,6 +633,45 @@ defmodule ExOutlines.Spec.Schema do
       # Add required fields if present
       if Map.has_key?(nested_json_schema, :required) do
         Map.put(base, :required, nested_json_schema.required)
+      else
+        base
+      end
+    end
+
+    defp item_spec_to_json_schema(%{type: :null}) do
+      %{type: "null"}
+    end
+
+    defp item_spec_to_json_schema(%{type: {:union, type_specs}}) do
+      one_of =
+        Enum.map(type_specs, fn type_spec ->
+          mini_spec = Map.delete(type_spec, :description)
+          item_spec_to_json_schema(mini_spec)
+        end)
+
+      %{oneOf: one_of}
+    end
+
+    defp item_spec_to_json_schema(%{type: {:array, inner_spec}} = spec) do
+      base = %{
+        type: "array",
+        items: item_spec_to_json_schema(inner_spec)
+      }
+
+      base =
+        case Map.get(spec, :min_items) do
+          nil -> base
+          min_items -> Map.put(base, :minItems, min_items)
+        end
+
+      base =
+        case Map.get(spec, :max_items) do
+          nil -> base
+          max_items -> Map.put(base, :maxItems, max_items)
+        end
+
+      if Map.get(spec, :unique_items, false) do
+        Map.put(base, :uniqueItems, true)
       else
         base
       end
@@ -847,6 +1000,9 @@ defmodule ExOutlines.Spec.Schema do
 
       errors = errors ++ validate_min_constraint(name, min_value, value, use_positive_message)
       errors = errors ++ validate_max_constraint(name, Map.get(spec, :max), value)
+      errors = errors ++ validate_exclusive_min(name, Map.get(spec, :exclusive_min), value)
+      errors = errors ++ validate_exclusive_max(name, Map.get(spec, :exclusive_max), value)
+      errors = errors ++ validate_multiple_of(name, Map.get(spec, :multiple_of), value)
 
       errors
     end
@@ -887,6 +1043,68 @@ defmodule ExOutlines.Spec.Schema do
     end
 
     defp validate_max_constraint(_name, _max, _value), do: []
+
+    defp validate_exclusive_min(_name, nil, _value), do: []
+
+    defp validate_exclusive_min(name, ex_min, value)
+         when is_number(ex_min) and is_number(value) and value <= ex_min do
+      [
+        %{
+          field: to_string(name),
+          expected: "value > #{ex_min}",
+          got: value,
+          message: "Field '#{name}' must be greater than #{ex_min} (exclusive)"
+        }
+      ]
+    end
+
+    defp validate_exclusive_min(_name, _ex_min, _value), do: []
+
+    defp validate_exclusive_max(_name, nil, _value), do: []
+
+    defp validate_exclusive_max(name, ex_max, value)
+         when is_number(ex_max) and is_number(value) and value >= ex_max do
+      [
+        %{
+          field: to_string(name),
+          expected: "value < #{ex_max}",
+          got: value,
+          message: "Field '#{name}' must be less than #{ex_max} (exclusive)"
+        }
+      ]
+    end
+
+    defp validate_exclusive_max(_name, _ex_max, _value), do: []
+
+    defp validate_multiple_of(_name, nil, _value), do: []
+
+    defp validate_multiple_of(name, mult, value)
+         when is_number(mult) and mult > 0 and is_number(value) do
+      is_multiple =
+        if is_float(value) or is_float(mult) do
+          # Coerce to float for :math.fmod/2 which requires float arguments
+          remainder = :math.fmod(value / 1, mult / 1)
+          abs(remainder) < 1.0e-9 or abs(abs(remainder) - abs(mult / 1)) < 1.0e-9
+        else
+          rem(value, mult) == 0
+        end
+
+      if is_multiple do
+        []
+      else
+        [
+          %{
+            field: to_string(name),
+            expected: "multiple of #{mult}",
+            got: value,
+            message: "Field '#{name}' must be a multiple of #{mult}"
+          }
+        ]
+      end
+    end
+
+    # Non-numeric or non-positive mult (defensive -- should be caught at normalization)
+    defp validate_multiple_of(_name, _mult, _value), do: []
 
     defp validate_number_constraints(name, spec, value) do
       errors = []
@@ -931,7 +1149,12 @@ defmodule ExOutlines.Spec.Schema do
             errors
         end
 
-      Enum.reverse(errors)
+      errors = Enum.reverse(errors)
+      errors = errors ++ validate_exclusive_min(name, Map.get(spec, :exclusive_min), value)
+      errors = errors ++ validate_exclusive_max(name, Map.get(spec, :exclusive_max), value)
+      errors = errors ++ validate_multiple_of(name, Map.get(spec, :multiple_of), value)
+
+      errors
     end
 
     defp validate_string_constraints(name, spec, value) do

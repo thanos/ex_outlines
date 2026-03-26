@@ -121,7 +121,7 @@ defmodule ExOutlines.Backend.HTTP do
   defp build_request_body(messages, config) do
     body = %{
       model: config.model,
-      messages: messages,
+      messages: Enum.map(messages, &format_message/1),
       temperature: config.temperature,
       max_tokens: config.max_tokens
     }
@@ -130,6 +130,31 @@ defmodule ExOutlines.Backend.HTTP do
       {:ok, json} -> {:ok, json}
       {:error, error} -> {:error, {:json_encode_error, error}}
     end
+  end
+
+  defp format_message(%{role: role, content: content}) when is_binary(content) do
+    %{role: role, content: content}
+  end
+
+  defp format_message(%{role: role, content: parts}) when is_list(parts) do
+    %{role: role, content: Enum.map(parts, &format_content_part/1)}
+  end
+
+  defp format_message(msg) do
+    raise ArgumentError,
+          "unsupported message format: expected %{role: string, content: string | list}, got: #{inspect(msg)}"
+  end
+
+  defp format_content_part(%{type: :text, text: text}) do
+    %{type: "text", text: text}
+  end
+
+  defp format_content_part(%{type: :image_url, url: url}) do
+    %{type: "image_url", image_url: %{url: url}}
+  end
+
+  defp format_content_part(%{type: :image_base64, data: data, media_type: media_type}) do
+    %{type: "image_url", image_url: %{url: "data:#{media_type};base64,#{data}"}}
   end
 
   defp make_request(url, api_key, body) do
