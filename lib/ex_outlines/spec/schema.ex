@@ -88,6 +88,7 @@ defmodule ExOutlines.Spec.Schema do
           | :number
           | {:enum, [any()]}
           | {:array, item_spec()}
+          | {:tuple, [item_spec()]}
           | {:object, t()}
           | {:union, [item_spec()]}
           | :null
@@ -387,11 +388,11 @@ defmodule ExOutlines.Spec.Schema do
         %{field: dep_field, equals: dep_value} = spec.depends_on
 
         %{
-          "if" => %{
+          if: %{
             properties: %{dep_field => %{const: dep_value}},
             required: [to_string(dep_field)]
           },
-          "then" => %{
+          then: %{
             required: [to_string(name)]
           }
         }

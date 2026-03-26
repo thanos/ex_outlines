@@ -1571,8 +1571,8 @@ defmodule ExOutlines.Spec.SchemaTest do
       json_schema = Spec.to_schema(schema)
 
       assert [conditional] = json_schema[:allOf]
-      assert conditional["if"][:properties][:type] == %{const: "company"}
-      assert conditional["then"][:required] == ["reg_num"]
+      assert conditional[:if][:properties][:type] == %{const: "company"}
+      assert conditional[:then][:required] == ["reg_num"]
     end
 
     test "no allOf when no conditional fields" do

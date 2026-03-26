@@ -44,9 +44,7 @@ defmodule ExOutlines.ContentTest do
 
     test "infers media type from extension" do
       dir = System.tmp_dir!()
-
       uid = System.unique_integer([:positive])
-      paths = []
 
       for {ext, expected_type} <- [
             {".jpg", "image/jpeg"},
@@ -60,8 +58,6 @@ defmodule ExOutlines.ContentTest do
         part = Content.image_file(path)
         assert part.media_type == expected_type
       end
-
-      paths
     end
 
     test "raises on unsupported extension" do

@@ -259,10 +259,14 @@ defmodule ExOutlines do
   defp validate_content([]), do: {:error, {:invalid_content, []}}
 
   defp validate_content(parts) when is_list(parts) do
-    if Enum.all?(parts, &valid_content_part?/1) do
+    invalid = Enum.reject(parts, &valid_content_part?/1)
+
+    if invalid == [] do
       :ok
     else
-      {:error, {:invalid_content, parts}}
+      # Return only types of invalid parts to avoid bloating logs with base64 data
+      invalid_types = Enum.map(invalid, &Map.get(&1, :type, :unknown))
+      {:error, {:invalid_content, {:invalid_parts, invalid_types}}}
     end
   end
 
