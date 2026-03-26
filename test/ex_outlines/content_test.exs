@@ -45,30 +45,34 @@ defmodule ExOutlines.ContentTest do
     test "infers media type from extension" do
       dir = System.tmp_dir!()
 
+      uid = System.unique_integer([:positive])
+      paths = []
+
       for {ext, expected_type} <- [
             {".jpg", "image/jpeg"},
             {".jpeg", "image/jpeg"},
             {".gif", "image/gif"},
             {".webp", "image/webp"}
           ] do
-        path = Path.join(dir, "test#{ext}")
+        path = Path.join(dir, "test_#{uid}#{ext}")
         File.write!(path, "data")
+        on_exit(fn -> File.rm(path) end)
         part = Content.image_file(path)
         assert part.media_type == expected_type
-        File.rm(path)
       end
+
+      paths
     end
 
     test "raises on unsupported extension" do
       dir = System.tmp_dir!()
-      path = Path.join(dir, "test.bmp")
+      path = Path.join(dir, "test_#{System.unique_integer([:positive])}.bmp")
       File.write!(path, "data")
+      on_exit(fn -> File.rm(path) end)
 
       assert_raise ArgumentError, ~r/unsupported image extension/, fn ->
         Content.image_file(path)
       end
-
-      File.rm(path)
     end
   end
 

@@ -6,7 +6,7 @@ defmodule ExOutlines.StreamTest do
   alias ExOutlines.Stream, as: S
 
   describe "validated_stream/2" do
-    test "accumulates chunks and validates on done" do
+    test "emits raw chunks and validates on done" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
       events = [
@@ -17,8 +17,39 @@ defmodule ExOutlines.StreamTest do
 
       results = S.validated_stream(events, schema) |> Enum.to_list()
 
-      assert [{:chunk, ~s({"na)}, {:chunk, ~s({"name": "Alice"})}, {:ok, %{name: "Alice"}}] =
-               results
+      assert [
+               {:chunk, ~s({"na)},
+               {:chunk, ~s(me": "Alice"})},
+               {:ok, %{name: "Alice"}}
+             ] = results
+    end
+
+    test "halts after done event" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      events = [
+        {:done, ~s({"name": "Alice"})},
+        {:chunk, "should not appear"},
+        {:done, ~s({"name": "Bob"})}
+      ]
+
+      results = S.validated_stream(events, schema) |> Enum.to_list()
+
+      assert [{:ok, %{name: "Alice"}}] = results
+    end
+
+    test "halts after error event" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      events = [
+        {:chunk, "partial"},
+        {:error, :connection_reset},
+        {:chunk, "should not appear"}
+      ]
+
+      results = S.validated_stream(events, schema) |> Enum.to_list()
+
+      assert [{:chunk, "partial"}, {:error, {:stream_error, :connection_reset}}] = results
     end
 
     test "returns validation error on done when JSON is invalid" do

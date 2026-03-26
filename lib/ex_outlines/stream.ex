@@ -14,10 +14,13 @@ defmodule ExOutlines.Stream do
   Takes a stream of `{:chunk, text}`, `{:done, full_text}`, and `{:error, reason}`
   events from a backend and produces a stream that:
 
-  1. Emits `{:chunk, accumulated_text}` as chunks arrive
+  1. Emits `{:chunk, text}` for each incremental chunk of text as it arrives
   2. On `{:done, full_text}`, validates the full response against the spec
   3. Emits `{:ok, validated_result}` on success
   4. Emits `{:error, reason}` on validation failure or backend error
+
+  The stream halts after a terminal event (`:done` or `:error`), ensuring
+  consumers receive exactly one terminal result.
 
   ## Parameters
 
@@ -26,17 +29,19 @@ defmodule ExOutlines.Stream do
   """
   @spec validated_stream(Enumerable.t(), ExOutlines.Spec.t()) :: Enumerable.t()
   def validated_stream(backend_stream, spec) do
-    Stream.transform(backend_stream, [], fn
-      {:chunk, text}, acc ->
-        new_acc = [acc, text]
-        {[{:chunk, IO.iodata_to_binary(new_acc)}], new_acc}
+    Stream.transform(backend_stream, :streaming, fn
+      _event, :halted ->
+        {:halt, :halted}
 
-      {:done, full_text}, _acc ->
+      {:chunk, text}, :streaming ->
+        {[{:chunk, text}], :streaming}
+
+      {:done, full_text}, :streaming ->
         result = validate_complete(full_text, spec)
-        {[result], []}
+        {[result], :halted}
 
-      {:error, reason}, acc ->
-        {[{:error, {:stream_error, reason}}], acc}
+      {:error, reason}, :streaming ->
+        {[{:error, {:stream_error, reason}}], :halted}
     end)
   end
 
