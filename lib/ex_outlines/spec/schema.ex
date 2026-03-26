@@ -638,6 +638,45 @@ defmodule ExOutlines.Spec.Schema do
       end
     end
 
+    defp item_spec_to_json_schema(%{type: :null}) do
+      %{type: "null"}
+    end
+
+    defp item_spec_to_json_schema(%{type: {:union, type_specs}}) do
+      one_of =
+        Enum.map(type_specs, fn type_spec ->
+          mini_spec = Map.delete(type_spec, :description)
+          field_to_json_schema(mini_spec)
+        end)
+
+      %{oneOf: one_of}
+    end
+
+    defp item_spec_to_json_schema(%{type: {:array, inner_spec}} = spec) do
+      base = %{
+        type: "array",
+        items: item_spec_to_json_schema(inner_spec)
+      }
+
+      base =
+        case Map.get(spec, :min_items) do
+          nil -> base
+          min_items -> Map.put(base, :minItems, min_items)
+        end
+
+      base =
+        case Map.get(spec, :max_items) do
+          nil -> base
+          max_items -> Map.put(base, :maxItems, max_items)
+        end
+
+      if Map.get(spec, :unique_items, false) do
+        Map.put(base, :uniqueItems, true)
+      else
+        base
+      end
+    end
+
     defp add_description(schema, %{description: desc}) when is_binary(desc) do
       Map.put(schema, :description, desc)
     end

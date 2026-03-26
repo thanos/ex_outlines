@@ -53,6 +53,8 @@ defmodule ExOutlines do
   - `{:error, {:invalid_backend, value}}` - Backend is not an atom
   - `{:error, {:invalid_template, value}}` - Template is not `{binary, keyword}` or `nil`
   - `{:error, {:template_error, exception}}` - Template rendering failed (syntax error, runtime error)
+  - `{:error, {:invalid_content, value}}` - Content is not a list of valid content parts, or is empty
+  - `{:error, :template_and_content_conflict}` - Both `:template` and `:content` were provided
   """
   @spec generate(ExOutlines.Spec.t(), generate_opts()) :: generate_result()
   def generate(spec, opts \\ []) do

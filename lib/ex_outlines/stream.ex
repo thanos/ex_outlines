@@ -28,7 +28,7 @@ defmodule ExOutlines.Stream do
   def validated_stream(backend_stream, spec) do
     Stream.transform(backend_stream, [], fn
       {:chunk, text}, acc ->
-        new_acc = [acc | text]
+        new_acc = [acc, text]
         {[{:chunk, IO.iodata_to_binary(new_acc)}], new_acc}
 
       {:done, full_text}, _acc ->
