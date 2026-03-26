@@ -646,7 +646,7 @@ defmodule ExOutlines.Spec.Schema do
       one_of =
         Enum.map(type_specs, fn type_spec ->
           mini_spec = Map.delete(type_spec, :description)
-          field_to_json_schema(mini_spec)
+          item_spec_to_json_schema(mini_spec)
         end)
 
       %{oneOf: one_of}

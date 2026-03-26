@@ -196,8 +196,12 @@ defmodule ExOutlines.MixProject do
     Enum.each(steps, fn {task, env} ->
       Mix.shell().info(IO.ANSI.format([:bright, "==> mix #{task}", :reset]))
 
+      mix_executable =
+        System.find_executable("mix") ||
+          Mix.raise("Could not find `mix` executable on PATH")
+
       {_, exit_code} =
-        System.cmd("mix", String.split(task),
+        System.cmd(mix_executable, String.split(task),
           env: [{"MIX_ENV", to_string(env)}],
           into: IO.stream(:stdio, :line),
           stderr_to_stdout: true

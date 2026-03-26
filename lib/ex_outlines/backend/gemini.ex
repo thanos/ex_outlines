@@ -34,9 +34,11 @@ defmodule ExOutlines.Backend.Gemini do
 
   @impl true
   def call_llm(messages, opts) do
+    http_client = Keyword.get(opts, :http_client)
+
     with {:ok, config} <- validate_config(opts),
          {:ok, body} <- build_request_body(messages, config),
-         {:ok, response} <- make_request(config, body) do
+         {:ok, response} <- do_request(config, body, http_client) do
       parse_response(response)
     end
   end
@@ -135,6 +137,14 @@ defmodule ExOutlines.Backend.Gemini do
 
   defp gemini_role("assistant"), do: "model"
   defp gemini_role(role), do: role
+
+  defp do_request(config, body, nil), do: make_request(config, body)
+
+  defp do_request(config, body, http_client) when is_function(http_client, 2) do
+    query = URI.encode_query(%{"key" => config.api_key})
+    url = "#{@api_base_url}/#{URI.encode(config.model)}:generateContent?#{query}"
+    http_client.(url, body)
+  end
 
   defp make_request(config, body) do
     :inets.start()

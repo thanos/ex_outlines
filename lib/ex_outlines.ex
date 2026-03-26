@@ -66,8 +66,9 @@ defmodule ExOutlines do
   @doc """
   Generate structured output with streaming.
 
-  Returns a stream that emits `{:chunk, accumulated_text}` as the LLM generates,
-  followed by a final `{:ok, validated_result}` or `{:error, reason}`.
+  Returns a stream that emits `{:chunk, text}` for each incremental piece of text
+  as the LLM generates, followed by a final `{:ok, validated_result}` or
+  `{:error, reason}`. The stream halts after the terminal event.
 
   If the backend implements `call_llm_stream/2`, true streaming is used.
   Otherwise, falls back to buffered mode (single `{:ok, result}` emission).
