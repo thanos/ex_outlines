@@ -142,6 +142,17 @@ defmodule ExOutlines.StreamTest do
                ExOutlines.generate_stream(schema, [])
     end
 
+    test "returns backend error when stream initialization fails" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      # Mock without :mock key causes call_llm_stream to return {:error, :no_mock_provided}
+      assert {:error, {:backend_error, :no_mock_provided}} =
+               ExOutlines.generate_stream(schema,
+                 backend: Mock,
+                 backend_opts: []
+               )
+    end
+
     test "returns template error before creating stream" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 

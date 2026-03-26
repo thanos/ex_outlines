@@ -40,6 +40,9 @@ defmodule ExOutlines.Stream do
         result = validate_complete(full_text, spec)
         {[result], :halted}
 
+      {:error, {:stream_error, _} = reason}, :streaming ->
+        {[{:error, reason}], :halted}
+
       {:error, reason}, :streaming ->
         {[{:error, {:stream_error, reason}}], :halted}
     end)

@@ -40,10 +40,16 @@ defmodule ExOutlines.TemplateTest do
       assert result =~ "Negative: bad"
     end
 
-    test "does not raise when assigns are missing" do
-      # EEx emits a warning but does not raise for missing assigns
-      result = Template.render("Hello, <%= @missing %>!", [])
-      assert is_binary(result)
+    test "handles missing assigns gracefully" do
+      # EEx behavior for missing assigns varies by version (warn vs raise).
+      # Template.render/2 should either return a string or raise ArgumentError.
+      try do
+        result = Template.render("Hello, <%= @missing %>!", [])
+        assert is_binary(result)
+      rescue
+        e in ArgumentError ->
+          assert Exception.message(e) =~ "assign"
+      end
     end
 
     test "raises on non-keyword list assigns" do

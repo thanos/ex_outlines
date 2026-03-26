@@ -83,14 +83,14 @@ defmodule ExOutlines do
   ## Returns
 
   - `{:ok, stream}` - A stream of events
-  - `{:error, reason}` - Configuration or template error
+  - `{:error, reason}` - Configuration, template, or backend initialization error
   """
   @spec generate_stream(ExOutlines.Spec.t(), generate_opts()) ::
           {:ok, Enumerable.t()} | {:error, term()}
   def generate_stream(spec, opts \\ []) do
     with {:ok, config} <- validate_config(opts),
-         {:ok, messages} <- resolve_messages(spec, config, 0, []) do
-      stream = build_stream(spec, config.backend, messages, config.backend_opts)
+         {:ok, messages} <- resolve_messages(spec, config, 0, []),
+         {:ok, stream} <- build_stream(spec, config.backend, messages, config.backend_opts) do
       {:ok, stream}
     end
   end
@@ -99,16 +99,16 @@ defmodule ExOutlines do
     if function_exported?(backend, :call_llm_stream, 2) do
       case backend.call_llm_stream(messages, backend_opts) do
         {:ok, backend_stream} ->
-          ExOutlines.Stream.validated_stream(backend_stream, spec)
+          {:ok, ExOutlines.Stream.validated_stream(backend_stream, spec)}
 
         {:error, reason} ->
-          [{:error, {:backend_error, reason}}]
+          {:error, {:backend_error, reason}}
       end
     else
       # Fallback: call synchronous backend and wrap as stream
       result = call_backend(backend, messages, backend_opts)
       buffered = ExOutlines.Stream.from_buffered(result)
-      ExOutlines.Stream.validated_stream(buffered, spec)
+      {:ok, ExOutlines.Stream.validated_stream(buffered, spec)}
     end
   end
 

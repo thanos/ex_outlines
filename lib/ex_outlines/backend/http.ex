@@ -140,6 +140,11 @@ defmodule ExOutlines.Backend.HTTP do
     %{role: role, content: Enum.map(parts, &format_content_part/1)}
   end
 
+  defp format_message(msg) do
+    raise ArgumentError,
+          "unsupported message format: expected %{role: string, content: string | list}, got: #{inspect(msg)}"
+  end
+
   defp format_content_part(%{type: :text, text: text}) do
     %{type: "text", text: text}
   end
