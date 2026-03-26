@@ -316,10 +316,16 @@ defmodule ExOutlines.Spec.Schema do
       format: Map.get(spec, :format)
     }
 
-    # Recursively normalize nested array item specs
+    # Recursively normalize nested complex item specs
     case base.type do
       {:array, nested} when is_map(nested) ->
         %{base | type: {:array, normalize_item_spec(nested)}}
+
+      {:union, type_specs} when is_list(type_specs) ->
+        %{base | type: {:union, Enum.map(type_specs, &normalize_item_spec/1)}}
+
+      {:tuple, type_specs} when is_list(type_specs) ->
+        %{base | type: {:tuple, Enum.map(type_specs, &normalize_item_spec/1)}}
 
       _ ->
         base
@@ -803,11 +809,18 @@ defmodule ExOutlines.Spec.Schema do
           static_required
 
         %{field: dep_field, equals: dep_value} ->
-          actual = Map.get(value, dep_field) || Map.get(value, to_string(dep_field))
+          actual = fetch_dep_value(value, dep_field)
           static_required or actual == dep_value
 
         _ ->
           static_required
+      end
+    end
+
+    defp fetch_dep_value(value, dep_field) do
+      case Map.fetch(value, dep_field) do
+        {:ok, v} -> v
+        :error -> Map.get(value, to_string(dep_field))
       end
     end
 

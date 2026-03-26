@@ -97,7 +97,7 @@ defmodule ExOutlines do
 
   defp build_stream(spec, backend, messages, backend_opts) do
     if function_exported?(backend, :call_llm_stream, 2) do
-      case backend.call_llm_stream(messages, backend_opts) do
+      case call_backend_stream(backend, messages, backend_opts) do
         {:ok, backend_stream} ->
           {:ok, ExOutlines.Stream.validated_stream(backend_stream, spec)}
 
@@ -110,6 +110,13 @@ defmodule ExOutlines do
       buffered = ExOutlines.Stream.from_buffered(result)
       {:ok, ExOutlines.Stream.validated_stream(buffered, spec)}
     end
+  end
+
+  defp call_backend_stream(backend, messages, opts) do
+    backend.call_llm_stream(messages, opts)
+  rescue
+    error ->
+      {:error, {:backend_exception, error}}
   end
 
   @doc """

@@ -200,23 +200,43 @@ defmodule ExOutlines.StreamTest do
   end
 
   describe "generate_stream/2 with non-streaming backend fallback" do
-    test "falls back to buffered mode for backends without call_llm_stream" do
-      # HTTP backend doesn't implement call_llm_stream yet
-      # We test fallback by using a backend that only has call_llm
-      schema = Schema.new(%{name: %{type: :string, required: true}})
+    defmodule BufferedOnlyBackend do
+      @behaviour ExOutlines.Backend
 
-      # Mock with only a regular response (no stream_chunks)
-      mock = Mock.new([{:ok, ~s({"name": "Fallback"})}])
+      @impl true
+      def call_llm(_messages, opts) do
+        Keyword.fetch!(opts, :response)
+      end
+
+      # Intentionally does NOT implement call_llm_stream/2
+    end
+
+    test "falls back to buffered mode for backends without call_llm_stream" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
 
       {:ok, stream} =
         ExOutlines.generate_stream(schema,
-          backend: Mock,
-          backend_opts: [mock: mock]
+          backend: BufferedOnlyBackend,
+          backend_opts: [response: {:ok, ~s({"name": "Fallback"})}]
         )
 
       results = Enum.to_list(stream)
 
       assert [{:ok, %{name: "Fallback"}}] = results
+    end
+
+    test "buffered fallback propagates backend errors" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      {:ok, stream} =
+        ExOutlines.generate_stream(schema,
+          backend: BufferedOnlyBackend,
+          backend_opts: [response: {:error, :timeout}]
+        )
+
+      results = Enum.to_list(stream)
+
+      assert [{:error, {:stream_error, :timeout}}] = results
     end
   end
 end

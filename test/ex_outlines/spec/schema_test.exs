@@ -1108,6 +1108,29 @@ defmodule ExOutlines.Spec.SchemaTest do
         Schema.new(%{values: %{type: {:array, %{type: :integer, exclusive_min: "bad"}}}})
       end
     end
+
+    test "normalizes nested union item specs" do
+      # Union branches inside array items should have their constraints validated
+      assert_raise ArgumentError, ~r/multiple_of must be a positive number/, fn ->
+        Schema.new(%{
+          values: %{
+            type: {:array, %{type: {:union, [%{type: :integer, multiple_of: 0}, %{type: :string}]}}}
+          }
+        })
+      end
+    end
+
+    test "normalizes nested tuple item specs" do
+      assert_raise ArgumentError, ~r/exclusive_min must be a number/, fn ->
+        Schema.new(%{
+          values: %{
+            type:
+              {:array,
+               %{type: {:tuple, [%{type: :integer, exclusive_min: "bad"}, %{type: :string}]}}}
+          }
+        })
+      end
+    end
   end
 
   describe "array validation" do
@@ -1557,6 +1580,27 @@ defmodule ExOutlines.Spec.SchemaTest do
 
       json_schema = Spec.to_schema(schema)
       refute Map.has_key?(json_schema, :allOf)
+    end
+
+    test "depends_on works correctly when dependency value is false" do
+      schema =
+        Schema.new(%{
+          active: %{type: :boolean, required: true},
+          reason: %{
+            type: :string,
+            depends_on: %{field: :active, equals: false}
+          }
+        })
+
+      # active is false -> reason is required
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"active" => false})
+
+      assert Enum.any?(diag.errors, &(&1.field == "reason"))
+
+      # active is true -> reason is not required
+      assert {:ok, result} = Spec.validate(schema, %{"active" => true})
+      assert result.active == true
     end
   end
 

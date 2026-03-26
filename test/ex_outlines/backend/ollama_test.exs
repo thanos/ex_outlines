@@ -229,6 +229,69 @@ defmodule ExOutlines.Backend.OllamaTest do
     end
   end
 
+  describe "multimodal content" do
+    test "passes base64 images in the images field" do
+      client = fake_client(success_response(ollama_response(~s({"x":1}))))
+
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{type: :text, text: "Describe this"},
+            %{type: :image_base64, data: "abc123", media_type: "image/png"}
+          ]
+        }
+      ]
+
+      Ollama.call_llm(messages, model: "llava", http_client: client)
+
+      assert_receive {:http_request, _url, body}
+      decoded = Jason.decode!(body)
+      [msg] = decoded["messages"]
+      assert msg["content"] == "Describe this"
+      assert msg["images"] == ["abc123"]
+    end
+
+    test "rejects unsupported content types" do
+      client = fake_client(success_response(ollama_response(~s({"x":1}))))
+
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{type: :text, text: "hi"},
+            %{type: :image_url, url: "https://example.com/img.jpg"}
+          ]
+        }
+      ]
+
+      assert {:error, {:unsupported_content_types, [:image_url]}} =
+               Ollama.call_llm(messages, model: "llama3", http_client: client)
+    end
+  end
+
+  describe "stream error handling" do
+    test "emits error for malformed JSON lines in stream" do
+      stream_response =
+        [
+          Jason.encode!(%{"message" => %{"content" => "{"}, "done" => false}),
+          "this is not json",
+          Jason.encode!(%{"message" => %{"content" => "}"}, "done" => true})
+        ]
+        |> Enum.join("\n")
+
+      client = fake_client(success_response(stream_response))
+
+      {:ok, events} =
+        Ollama.call_llm_stream([%{role: "user", content: "hi"}],
+          model: "llama3",
+          http_client: client
+        )
+
+      assert [{:chunk, "{"}, {:error, {:json_decode_error, _}}, {:done, _}] = events
+    end
+  end
+
   describe "integration" do
     test "works with ExOutlines.generate" do
       client = fake_client(success_response(ollama_response(~s({"name": "Alice"}))))

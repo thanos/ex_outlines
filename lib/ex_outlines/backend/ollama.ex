@@ -26,6 +26,13 @@ defmodule ExOutlines.Backend.Ollama do
   Ollama supports a `format: "json"` parameter that forces JSON output,
   improving first-attempt success rates for structured generation.
   This is enabled by default.
+
+  ## Multimodal Support
+
+  Ollama supports images via the `images` field for vision-capable models
+  (e.g., llava). When content parts include `:image_base64`, the base64
+  data is passed in the `images` array alongside the text content.
+  `:image_url` parts are not supported by Ollama and will be rejected.
   """
 
   @behaviour ExOutlines.Backend
@@ -79,32 +86,56 @@ defmodule ExOutlines.Backend.Ollama do
   end
 
   defp build_request_body(messages, config, opts) do
-    body = %{
-      model: config.model,
-      messages: format_messages(messages),
-      format: "json",
-      stream: Keyword.get(opts, :stream, false),
-      options: %{temperature: config.temperature}
-    }
+    with {:ok, formatted} <- format_messages(messages) do
+      body = %{
+        model: config.model,
+        messages: formatted,
+        format: "json",
+        stream: Keyword.get(opts, :stream, false),
+        options: %{temperature: config.temperature}
+      }
 
-    Jason.encode(body)
+      Jason.encode(body)
+    end
   end
 
   defp format_messages(messages) do
-    Enum.map(messages, fn msg ->
-      %{role: msg.role, content: format_content(msg.content)}
-    end)
+    results = Enum.map(messages, &format_message/1)
+
+    case Enum.find(results, &match?({:error, _}, &1)) do
+      nil -> {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
+      error -> error
+    end
   end
 
-  defp format_content(content) when is_binary(content), do: content
+  defp format_message(%{role: role, content: content}) when is_binary(content) do
+    {:ok, %{role: role, content: content}}
+  end
 
-  defp format_content(parts) when is_list(parts) do
-    # Ollama chat API expects content as a string; concatenate text parts
-    # and attach images via the "images" field (handled separately).
-    # For simplicity, join text parts and ignore unsupported types.
-    parts
-    |> Enum.filter(fn %{type: type} -> type == :text end)
-    |> Enum.map_join("\n", fn %{text: text} -> text end)
+  defp format_message(%{role: role, content: parts}) when is_list(parts) do
+    {text_parts, image_parts, unsupported} = classify_parts(parts)
+
+    if unsupported != [] do
+      types = Enum.map(unsupported, & &1.type)
+      {:error, {:unsupported_content_types, types}}
+    else
+      text = Enum.map_join(text_parts, "\n", fn %{text: t} -> t end)
+      images = Enum.map(image_parts, fn %{data: data} -> data end)
+
+      msg = %{role: role, content: text}
+      msg = if images == [], do: msg, else: Map.put(msg, :images, images)
+      {:ok, msg}
+    end
+  end
+
+  defp classify_parts(parts) do
+    Enum.reduce(parts, {[], [], []}, fn part, {texts, images, unsupported} ->
+      case part do
+        %{type: :text} -> {texts ++ [part], images, unsupported}
+        %{type: :image_base64} -> {texts, images ++ [part], unsupported}
+        other -> {texts, images, unsupported ++ [other]}
+      end
+    end)
   end
 
   defp do_request(url, body, nil), do: make_request(url, body)
@@ -115,10 +146,10 @@ defmodule ExOutlines.Backend.Ollama do
 
   defp make_request(url, body) do
     :inets.start()
+    :ssl.start()
 
     headers = [{~c"content-type", ~c"application/json"}]
 
-    # Ollama runs locally, so no SSL needed for default localhost
     http_options =
       if String.starts_with?(url, "https") do
         [
@@ -172,33 +203,29 @@ defmodule ExOutlines.Backend.Ollama do
   end
 
   defp parse_stream_response(response_body) do
-    # Ollama streaming returns newline-delimited JSON objects.
-    # When called via :httpc (non-streaming HTTP), the full response
-    # is returned at once. Parse all lines and convert to stream events.
-    events =
+    {rev_events, _acc} =
       response_body
       |> String.split("\n", trim: true)
       |> Enum.reduce({[], ""}, fn line, {events, acc} ->
         case Jason.decode(line) do
           {:ok, %{"done" => true, "message" => %{"content" => content}}} ->
             full_text = acc <> content
-            {events ++ [{:done, full_text}], full_text}
+            {[{:done, full_text} | events], full_text}
 
           {:ok, %{"done" => true}} ->
-            {events ++ [{:done, acc}], acc}
+            {[{:done, acc} | events], acc}
 
           {:ok, %{"message" => %{"content" => content}}} ->
-            {events ++ [{:chunk, content}], acc <> content}
+            {[{:chunk, content} | events], acc <> content}
 
           {:ok, %{"error" => error}} ->
-            {events ++ [{:error, {:api_error, error}}], acc}
+            {[{:error, {:api_error, error}} | events], acc}
 
-          {:error, _} ->
-            {events, acc}
+          {:error, decode_error} ->
+            {[{:error, {:json_decode_error, decode_error}} | events], acc}
         end
       end)
-      |> elem(0)
 
-    {:ok, events}
+    {:ok, Enum.reverse(rev_events)}
   end
 end
