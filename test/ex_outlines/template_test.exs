@@ -70,8 +70,11 @@ defmodule ExOutlines.TemplateTest do
     end
 
     test "raises on missing file" do
+      missing =
+        Path.join(System.tmp_dir!(), "nonexistent_#{System.unique_integer([:positive])}.eex")
+
       assert_raise File.Error, fn ->
-        Template.render_file("/nonexistent/path.eex", [])
+        Template.render_file(missing, [])
       end
     end
   end

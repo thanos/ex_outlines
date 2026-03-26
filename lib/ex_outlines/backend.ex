@@ -21,11 +21,7 @@ defmodule ExOutlines.Backend do
           | %{type: :image_url, url: String.t()}
           | %{type: :image_base64, data: String.t(), media_type: String.t()}
 
-  @type call_opts :: [
-          model: String.t(),
-          temperature: float(),
-          max_tokens: pos_integer()
-        ]
+  @type call_opts :: keyword()
 
   @type stream_event ::
           {:chunk, String.t()}

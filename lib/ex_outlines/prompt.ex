@@ -5,7 +5,7 @@ defmodule ExOutlines.Prompt do
   Builds structured prompts from specs and diagnostics.
   """
 
-  @type message :: %{role: String.t(), content: String.t()}
+  @type message :: ExOutlines.Backend.message()
 
   @doc """
   Build initial generation prompt from a spec.
@@ -78,7 +78,7 @@ defmodule ExOutlines.Prompt do
   instructions in the user message. The system message remains text-only.
   """
   @spec build_initial_with_content(ExOutlines.Spec.t(), [ExOutlines.Backend.content_part()]) ::
-          [ExOutlines.Backend.message()]
+          [message()]
   def build_initial_with_content(spec, content_parts) when is_list(content_parts) do
     schema_json =
       spec

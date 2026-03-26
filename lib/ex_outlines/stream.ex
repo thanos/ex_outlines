@@ -1,9 +1,9 @@
 defmodule ExOutlines.Stream do
   @moduledoc """
-  Stream accumulation and incremental validation for streaming generation.
+  Stream accumulation and validation for streaming generation.
 
-  Accumulates text chunks from a streaming backend, detects JSON completion,
-  and runs full validation when the stream finishes.
+  Accumulates text chunks from a streaming backend and runs full
+  validation when the backend signals completion via a `{:done, text}` event.
   """
 
   @type chunk_event :: {:chunk, String.t()} | {:done, String.t()} | {:error, term()}
@@ -15,7 +15,7 @@ defmodule ExOutlines.Stream do
   events from a backend and produces a stream that:
 
   1. Emits `{:chunk, accumulated_text}` as chunks arrive
-  2. On completion, validates the full response against the spec
+  2. On `{:done, full_text}`, validates the full response against the spec
   3. Emits `{:ok, validated_result}` on success
   4. Emits `{:error, reason}` on validation failure or backend error
 
@@ -26,14 +26,14 @@ defmodule ExOutlines.Stream do
   """
   @spec validated_stream(Enumerable.t(), ExOutlines.Spec.t()) :: Enumerable.t()
   def validated_stream(backend_stream, spec) do
-    Stream.transform(backend_stream, "", fn
+    Stream.transform(backend_stream, [], fn
       {:chunk, text}, acc ->
-        new_acc = acc <> text
-        {[{:chunk, new_acc}], new_acc}
+        new_acc = [acc | text]
+        {[{:chunk, IO.iodata_to_binary(new_acc)}], new_acc}
 
       {:done, full_text}, _acc ->
         result = validate_complete(full_text, spec)
-        {[result], full_text}
+        {[result], []}
 
       {:error, reason}, acc ->
         {[{:error, {:stream_error, reason}}], acc}

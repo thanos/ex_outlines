@@ -110,9 +110,27 @@ defmodule ExOutlines.Backend.Gemini do
     Enum.map(messages, fn msg ->
       %{
         role: gemini_role(msg.role),
-        parts: [%{text: msg.content}]
+        parts: format_parts(msg.content)
       }
     end)
+  end
+
+  defp format_parts(content) when is_binary(content) do
+    [%{text: content}]
+  end
+
+  defp format_parts(parts) when is_list(parts) do
+    Enum.map(parts, &format_content_part/1)
+  end
+
+  defp format_content_part(%{type: :text, text: text}), do: %{text: text}
+
+  defp format_content_part(%{type: :image_base64, data: data, media_type: media_type}) do
+    %{inlineData: %{mimeType: media_type, data: data}}
+  end
+
+  defp format_content_part(%{type: :image_url, url: url}) do
+    %{fileData: %{fileUri: url}}
   end
 
   defp gemini_role("assistant"), do: "model"

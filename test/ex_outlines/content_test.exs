@@ -113,6 +113,28 @@ defmodule ExOutlines.ContentTest do
                )
     end
 
+    test "rejects empty content list" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:invalid_content, []}} =
+               ExOutlines.generate(schema,
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([])],
+                 content: []
+               )
+    end
+
+    test "rejects malformed content parts" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      assert {:error, {:invalid_content, _}} =
+               ExOutlines.generate(schema,
+                 backend: Mock,
+                 backend_opts: [mock: Mock.new([])],
+                 content: [%{bad: "part"}]
+               )
+    end
+
     test "works without content (backward compatible)" do
       mock = Mock.new([{:ok, ~s({"name": "Alice"})}])
       schema = Schema.new(%{name: %{type: :string, required: true}})

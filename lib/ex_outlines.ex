@@ -246,8 +246,26 @@ defmodule ExOutlines do
   defp validate_template(other), do: {:error, {:invalid_template, other}}
 
   defp validate_content(nil), do: :ok
-  defp validate_content(parts) when is_list(parts), do: :ok
+  defp validate_content([]), do: {:error, {:invalid_content, []}}
+
+  defp validate_content(parts) when is_list(parts) do
+    if Enum.all?(parts, &valid_content_part?/1) do
+      :ok
+    else
+      {:error, {:invalid_content, parts}}
+    end
+  end
+
   defp validate_content(other), do: {:error, {:invalid_content, other}}
+
+  defp valid_content_part?(%{type: :text, text: t}) when is_binary(t), do: true
+  defp valid_content_part?(%{type: :image_url, url: u}) when is_binary(u), do: true
+
+  defp valid_content_part?(%{type: :image_base64, data: d, media_type: m})
+       when is_binary(d) and is_binary(m),
+       do: true
+
+  defp valid_content_part?(_), do: false
 
   defp validate_no_template_content_conflict(nil, _), do: :ok
   defp validate_no_template_content_conflict(_, nil), do: :ok

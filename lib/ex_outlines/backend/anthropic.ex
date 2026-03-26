@@ -111,9 +111,27 @@ defmodule ExOutlines.Backend.Anthropic do
     Enum.map(messages, fn msg ->
       %{
         role: msg.role,
-        content: msg.content
+        content: format_content(msg.content)
       }
     end)
+  end
+
+  defp format_content(content) when is_binary(content), do: content
+
+  defp format_content(parts) when is_list(parts) do
+    Enum.map(parts, &format_content_part/1)
+  end
+
+  defp format_content_part(%{type: :text, text: text}) do
+    %{type: "text", text: text}
+  end
+
+  defp format_content_part(%{type: :image_base64, data: data, media_type: media_type}) do
+    %{type: "image", source: %{type: "base64", media_type: media_type, data: data}}
+  end
+
+  defp format_content_part(%{type: :image_url, url: url}) do
+    %{type: "image", source: %{type: "url", url: url}}
   end
 
   defp make_request(api_key, body) do
