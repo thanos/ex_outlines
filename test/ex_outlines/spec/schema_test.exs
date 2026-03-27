@@ -1131,6 +1131,24 @@ defmodule ExOutlines.Spec.SchemaTest do
         })
       end
     end
+
+    test "JSON Schema for tuple inside array includes prefixItems" do
+      schema =
+        Schema.new(%{
+          points: %{
+            type: {:array, %{type: {:tuple, [%{type: :number}, %{type: :number}]}}}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      items = json_schema.properties.points[:items]
+
+      assert items[:type] == "array"
+      assert items[:items] == false
+      assert items[:minItems] == 2
+      assert items[:maxItems] == 2
+      assert [%{type: "number"}, %{type: "number"}] = items[:prefixItems]
+    end
   end
 
   describe "array validation" do

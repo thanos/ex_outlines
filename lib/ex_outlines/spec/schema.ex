@@ -742,6 +742,18 @@ defmodule ExOutlines.Spec.Schema do
       end
     end
 
+    defp item_spec_to_json_schema(%{type: {:tuple, type_specs}}) when is_list(type_specs) do
+      prefix_items = Enum.map(type_specs, &item_spec_to_json_schema/1)
+
+      %{
+        type: "array",
+        prefixItems: prefix_items,
+        items: false,
+        minItems: length(type_specs),
+        maxItems: length(type_specs)
+      }
+    end
+
     defp add_description(schema, %{description: desc}) when is_binary(desc) do
       Map.put(schema, :description, desc)
     end

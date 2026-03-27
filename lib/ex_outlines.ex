@@ -265,7 +265,12 @@ defmodule ExOutlines do
       :ok
     else
       # Return only types of invalid parts to avoid bloating logs with base64 data
-      invalid_types = Enum.map(invalid, &Map.get(&1, :type, :unknown))
+      invalid_types =
+        Enum.map(invalid, fn
+          %{type: t} -> t
+          _ -> :unknown
+        end)
+
       {:error, {:invalid_content, {:invalid_parts, invalid_types}}}
     end
   end
