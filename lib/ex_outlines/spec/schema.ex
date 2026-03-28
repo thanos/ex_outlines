@@ -239,6 +239,20 @@ defmodule ExOutlines.Spec.Schema do
     end
   end
 
+  defp validate_depends_on!(spec) do
+    case Map.get(spec, :depends_on) do
+      nil ->
+        nil
+
+      %{field: field, equals: _value} = dep when is_atom(field) ->
+        dep
+
+      other ->
+        raise ArgumentError,
+              "depends_on must be %{field: atom, equals: value}, got: #{inspect(other)}"
+    end
+  end
+
   defp normalize_field_spec(spec) when is_map(spec) do
     # If Ecto is available, normalize Ecto-style DSL first
     spec =
@@ -275,7 +289,7 @@ defmodule ExOutlines.Spec.Schema do
       unique_items: Map.get(spec, :unique_items, false),
       pattern: pattern,
       format: Map.get(spec, :format),
-      depends_on: Map.get(spec, :depends_on),
+      depends_on: validate_depends_on!(spec),
       # Preserve Ecto-style DSL fields for optional Ecto integration
       length: Map.get(spec, :length),
       number: Map.get(spec, :number)
@@ -1503,6 +1517,9 @@ defmodule ExOutlines.Spec.Schema do
       do: validate_field_type(field_name, item_spec, item)
 
     defp validate_array_item_by_type({:array, _}, field_name, item_spec, item),
+      do: validate_field_type(field_name, item_spec, item)
+
+    defp validate_array_item_by_type({:tuple, _}, field_name, item_spec, item),
       do: validate_field_type(field_name, item_spec, item)
 
     defp validate_array_item_by_type(:null, field_name, item_spec, item),

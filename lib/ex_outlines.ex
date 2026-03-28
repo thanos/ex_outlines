@@ -53,6 +53,8 @@ defmodule ExOutlines do
   - `{:error, {:invalid_backend, value}}` - Backend is not an atom
   - `{:error, {:invalid_template, value}}` - Template is not `{binary, keyword}` or `nil`
   - `{:error, {:template_error, exception}}` - Template rendering failed (syntax error, runtime error)
+  - `{:error, {:prompt_error, exception}}` - Prompt construction failed
+  - `{:error, {:content_error, exception}}` - Multimodal content message construction failed
   - `{:error, {:invalid_content, value}}` - Content is not a list of valid content parts, or is empty
   - `{:error, :template_and_content_conflict}` - Both `:template` and `:content` were provided
   """
@@ -377,21 +379,24 @@ defmodule ExOutlines do
     {:ok, previous_messages}
   end
 
-  defp resolve_messages(spec, ctx, 0, _previous_messages) do
-    {:ok, build_initial_messages(spec, ctx.template, ctx.content)}
+  defp resolve_messages(spec, %{template: nil, content: nil}, 0, _previous_messages) do
+    {:ok, ExOutlines.Prompt.build_initial(spec)}
+  rescue
+    error -> {:error, {:prompt_error, error}}
+  end
+
+  defp resolve_messages(spec, %{template: {template, assigns}, content: nil}, 0, _prev)
+       when is_binary(template) and is_list(assigns) do
+    {:ok, ExOutlines.Template.build_messages(template, assigns, spec)}
   rescue
     error -> {:error, {:template_error, error}}
   end
 
-  defp build_initial_messages(spec, nil, nil), do: ExOutlines.Prompt.build_initial(spec)
-
-  defp build_initial_messages(spec, {template, assigns}, nil)
-       when is_binary(template) and is_list(assigns) do
-    ExOutlines.Template.build_messages(template, assigns, spec)
-  end
-
-  defp build_initial_messages(spec, nil, content) when is_list(content) do
-    ExOutlines.Prompt.build_initial_with_content(spec, content)
+  defp resolve_messages(spec, %{content: content}, 0, _previous_messages)
+       when is_list(content) do
+    {:ok, ExOutlines.Prompt.build_initial_with_content(spec, content)}
+  rescue
+    error -> {:error, {:content_error, error}}
   end
 
   defp call_backend(backend, messages, opts) do
