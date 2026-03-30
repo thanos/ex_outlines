@@ -623,6 +623,54 @@ mix credo --strict
 mix dialyzer
 ```
 
+### Integration Tests
+
+ExOutlines includes integration tests that verify real LLM API interactions. These tests are excluded by default.
+
+#### Running Integration Tests
+
+```bash
+# Run integration tests only (requires API keys)
+mix test --only integration
+
+# Run with specific API keys
+OPENAI_API_KEY=sk-... mix test --only integration
+
+# Run with all backends
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... GEMINI_API_KEY=AIza... mix test --only integration
+```
+
+#### Required Environment Variables
+
+| Backend | Variable | Notes |
+|---------|----------|-------|
+| OpenAI | `OPENAI_API_KEY` | Uses `gpt-4o-mini` model |
+| Anthropic | `ANTHROPIC_API_KEY` | Uses `claude-sonnet-4-5-20250929` |
+| Gemini | `GEMINI_API_KEY` | Uses `gemini-2.0-flash` |
+| Ollama | None | Checks `http://localhost:11434` |
+
+Tests skip automatically when their API key is not set or Ollama is not running.
+
+#### Ollama Setup
+
+For local Ollama integration tests:
+
+```bash
+# Install and start Ollama
+ollama serve
+
+# Pull a model (tested with llama3)
+ollama pull llama3
+
+# Run Ollama integration tests
+mix test test/integration/ollama_test.exs --only integration
+
+# Or use a different model
+OLLAMA_MODEL=mistral mix test test/integration/ollama_test.exs --only integration
+```
+
+See [Testing Strategies Guide](guides/testing_strategies.md) for details.
+
 ---
 
 ## Contributing
