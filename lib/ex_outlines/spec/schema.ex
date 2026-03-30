@@ -10,9 +10,12 @@ defmodule ExOutlines.Spec.Schema do
   - `:integer` - Integer values (supports `:positive` constraint)
   - `:boolean` - Boolean values (true/false)
   - `:number` - Numeric values (integer or float)
+  - `:null` - Null/nil values
   - `{:enum, values}` - Enumerated values from a list
   - `{:array, item_spec}` - Array/list of items with validation
   - `{:tuple, [item_spec]}` - Fixed-length array with positional type validation
+  - `{:object, schema}` - Nested object with its own schema
+  - `{:union, [type_spec]}` - Union of multiple types (oneOf in JSON Schema)
 
   ## Field Specification
 
@@ -120,7 +123,7 @@ defmodule ExOutlines.Spec.Schema do
           | {:array, item_spec()}
           | {:tuple, [item_spec()]}
           | {:object, t()}
-          | {:union, [map()]}
+          | {:union, [item_spec()]}
 
   @type field_spec :: %{
           type: field_type(),

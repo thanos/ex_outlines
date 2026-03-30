@@ -1029,6 +1029,37 @@ defmodule ExOutlines.Spec.SchemaTest do
       assert {:error, _} = Spec.validate(schema, %{"value" => -10})
       assert {:error, _} = Spec.validate(schema, %{"value" => 110})
     end
+
+    test "validates negative integer is multiple of value" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => -15})
+      assert result.quantity == -15
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => -5})
+      assert result.quantity == -5
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"quantity" => -7})
+      assert hd(diag.errors).message =~ "multiple of 5"
+    end
+
+    test "validates negative number is multiple of float value" do
+      schema = Schema.new(%{price: %{type: :number, multiple_of: 0.5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"price" => -2.5})
+      assert result.price == -2.5
+
+      assert {:error, _} = Spec.validate(schema, %{"price" => -2.3})
+    end
+
+    test "handles float precision edge case with multiple_of 0.1" do
+      schema = Schema.new(%{val: %{type: :number, multiple_of: 0.1}})
+
+      # 0.3 is notoriously imprecise in IEEE 754
+      assert {:ok, _} = Spec.validate(schema, %{"val" => 0.3})
+      assert {:ok, _} = Spec.validate(schema, %{"val" => 0.7})
+      assert {:ok, _} = Spec.validate(schema, %{"val" => 1.0})
+    end
   end
 
   describe "advanced numeric constraints in array items" do
@@ -1507,6 +1538,53 @@ defmodule ExOutlines.Spec.SchemaTest do
         Schema.new(%{bad: %{type: {:tuple, [%{type: :integer, multiple_of: 0}]}}})
       end
     end
+
+    test "validates constraints on positional tuple elements" do
+      schema =
+        Schema.new(%{
+          data: %{
+            type:
+              {:tuple,
+               [
+                 %{type: :integer, min: 0, max: 100},
+                 %{type: :string, min_length: 1}
+               ]}
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"data" => [50, "hello"]})
+      assert result.data == [50, "hello"]
+
+      # First element out of range
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"data" => [150, "hello"]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "at most 100"))
+
+      # Second element too short
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"data" => [50, ""]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "at least 1"))
+    end
+
+    test "validates tuple elements inside arrays" do
+      schema =
+        Schema.new(%{
+          points: %{
+            type: {:array, %{type: {:tuple, [%{type: :number}, %{type: :number}]}}}
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"points" => [[1.0, 2.0], [3.0, 4.0]]})
+      assert result.points == [[1.0, 2.0], [3.0, 4.0]]
+
+      # Wrong tuple length inside array
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"points" => [[1.0, 2.0], [3.0]]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "exactly 2 elements"))
+    end
   end
 
   describe "conditional fields (depends_on)" do
@@ -1619,6 +1697,44 @@ defmodule ExOutlines.Spec.SchemaTest do
       # active is true -> reason is not required
       assert {:ok, result} = Spec.validate(schema, %{"active" => true})
       assert result.active == true
+    end
+
+    test "depends_on when dependency field is entirely absent" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: false},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      # type is missing -> registration_number should not be conditionally required
+      assert {:ok, result} = Spec.validate(schema, %{})
+      refute Map.has_key?(result, :type)
+      refute Map.has_key?(result, :registration_number)
+    end
+
+    test "multiple depends_on fields on same dependency" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          tax_id: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          },
+          business_license: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"type" => "company"})
+
+      error_fields = Enum.map(diag.errors, & &1.field)
+      assert "tax_id" in error_fields
+      assert "business_license" in error_fields
     end
   end
 

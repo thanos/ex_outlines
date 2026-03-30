@@ -399,6 +399,10 @@ defmodule ExOutlines do
     error -> {:error, {:content_error, error}}
   end
 
+  defp resolve_messages(_spec, _ctx, 0, _previous_messages) do
+    {:error, {:invalid_config, "invalid template/content configuration"}}
+  end
+
   defp call_backend(backend, messages, opts) do
     backend.call_llm(messages, opts)
   rescue

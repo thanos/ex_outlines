@@ -40,11 +40,16 @@ defmodule ExOutlines.Stream do
         result = validate_complete(full_text, spec)
         {[result], :halted}
 
-      {:error, {:stream_error, _} = reason}, :streaming ->
-        {[{:error, reason}], :halted}
-
       {:error, reason}, :streaming ->
-        {[{:error, {:stream_error, reason}}], :halted}
+        wrapped =
+          case reason do
+            {:stream_error, _} -> reason
+            {:validation_failed, _} -> reason
+            {:json_decode_error, _} -> reason
+            other -> {:stream_error, other}
+          end
+
+        {[{:error, wrapped}], :halted}
 
       event, :streaming ->
         {[{:error, {:unexpected_stream_event, event}}], :halted}

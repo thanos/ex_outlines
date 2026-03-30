@@ -63,36 +63,60 @@ defmodule ExOutlines.Backend.Ollama do
   end
 
   defp validate_config(opts) do
-    model = Keyword.get(opts, :model)
+    with {:ok, model} <- validate_model(opts),
+         {:ok, url} <- validate_url(opts),
+         {:ok, temperature} <- validate_temperature(opts),
+         {:ok, max_tokens} <- validate_max_tokens(opts) do
+      {:ok, %{model: model, url: url, temperature: temperature, max_tokens: max_tokens}}
+    end
+  end
+
+  defp validate_model(opts) do
+    case Keyword.get(opts, :model) do
+      nil -> {:error, :missing_model}
+      m when is_binary(m) -> {:ok, m}
+      other -> {:error, {:invalid_model, other}}
+    end
+  end
+
+  defp validate_url(opts) do
     url = Keyword.get(opts, :url, @default_url)
-    temperature = Keyword.get(opts, :temperature, @default_temperature)
+    if is_binary(url), do: {:ok, url}, else: {:error, {:invalid_url, url}}
+  end
 
-    cond do
-      is_nil(model) ->
-        {:error, :missing_model}
+  defp validate_temperature(opts) do
+    t = Keyword.get(opts, :temperature, @default_temperature)
 
-      not is_binary(model) ->
-        {:error, {:invalid_model, model}}
+    if is_number(t) and t >= 0.0 and t <= 2.0,
+      do: {:ok, t},
+      else: {:error, {:invalid_temperature, t}}
+  end
 
-      not is_binary(url) ->
-        {:error, {:invalid_url, url}}
-
-      not is_number(temperature) or temperature < 0.0 or temperature > 2.0 ->
-        {:error, {:invalid_temperature, temperature}}
-
-      true ->
-        {:ok, %{model: model, url: url, temperature: temperature}}
+  defp validate_max_tokens(opts) do
+    case Keyword.get(opts, :max_tokens) do
+      nil -> {:ok, nil}
+      mt when is_integer(mt) and mt > 0 -> {:ok, mt}
+      other -> {:error, {:invalid_max_tokens, other}}
     end
   end
 
   defp build_request_body(messages, config, opts) do
     with {:ok, formatted} <- format_messages(messages) do
+      options = %{temperature: config.temperature}
+
+      options =
+        if config.max_tokens do
+          Map.put(options, :num_predict, config.max_tokens)
+        else
+          options
+        end
+
       body = %{
         model: config.model,
         messages: formatted,
         format: "json",
         stream: Keyword.get(opts, :stream, false),
-        options: %{temperature: config.temperature}
+        options: options
       }
 
       Jason.encode(body)
@@ -134,13 +158,16 @@ defmodule ExOutlines.Backend.Ollama do
   end
 
   defp classify_parts(parts) do
-    Enum.reduce(parts, {[], [], []}, fn part, {texts, images, unsupported} ->
-      case part do
-        %{type: :text} -> {texts ++ [part], images, unsupported}
-        %{type: :image_base64} -> {texts, images ++ [part], unsupported}
-        other -> {texts, images, unsupported ++ [other]}
-      end
-    end)
+    {texts, images, unsupported} =
+      Enum.reduce(parts, {[], [], []}, fn part, {texts, images, unsupported} ->
+        case part do
+          %{type: :text} -> {[part | texts], images, unsupported}
+          %{type: :image_base64} -> {texts, [part | images], unsupported}
+          other -> {texts, images, [other | unsupported]}
+        end
+      end)
+
+    {Enum.reverse(texts), Enum.reverse(images), Enum.reverse(unsupported)}
   end
 
   defp do_request(url, body, nil), do: make_request(url, body)

@@ -59,6 +59,41 @@ defmodule ExOutlines.Backend.OllamaTest do
     end
   end
 
+  describe "max_tokens validation" do
+    test "validates max_tokens is positive integer" do
+      assert {:error, {:invalid_max_tokens, -1}} =
+               Ollama.call_llm([], model: "llama3", max_tokens: -1)
+
+      assert {:error, {:invalid_max_tokens, "100"}} =
+               Ollama.call_llm([], model: "llama3", max_tokens: "100")
+    end
+
+    test "includes num_predict in options when max_tokens is set" do
+      client = fake_client(success_response(ollama_response(~s({"x":1}))))
+
+      Ollama.call_llm(
+        [%{role: "user", content: "hi"}],
+        model: "llama3",
+        max_tokens: 512,
+        http_client: client
+      )
+
+      assert_receive {:http_request, _url, body}
+      decoded = Jason.decode!(body)
+      assert decoded["options"]["num_predict"] == 512
+    end
+
+    test "omits num_predict when max_tokens not set" do
+      client = fake_client(success_response(ollama_response(~s({"x":1}))))
+
+      Ollama.call_llm([%{role: "user", content: "hi"}], model: "llama3", http_client: client)
+
+      assert_receive {:http_request, _url, body}
+      decoded = Jason.decode!(body)
+      refute Map.has_key?(decoded["options"], "num_predict")
+    end
+  end
+
   describe "request building" do
     test "sends to default localhost URL" do
       client = fake_client(success_response(ollama_response(~s({"x":1}))))

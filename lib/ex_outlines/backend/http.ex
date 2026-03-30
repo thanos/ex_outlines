@@ -46,9 +46,11 @@ defmodule ExOutlines.Backend.HTTP do
 
   @impl ExOutlines.Backend
   def call_llm(messages, opts) do
+    http_client = Keyword.get(opts, :http_client)
+
     with {:ok, config} <- validate_config(opts),
          {:ok, body} <- build_request_body(messages, config),
-         {:ok, response} <- make_request(config.url, config.api_key, body) do
+         {:ok, response} <- do_request(config.url, config.api_key, body, http_client) do
       parse_response(response)
     end
   end
@@ -162,6 +164,12 @@ defmodule ExOutlines.Backend.HTTP do
           "unsupported content part type: #{inspect(Map.get(part, :type, part))}"
   end
 
+  defp do_request(url, api_key, body, nil), do: make_request(url, api_key, body)
+
+  defp do_request(url, _api_key, body, http_client) when is_function(http_client, 2) do
+    http_client.(url, body)
+  end
+
   defp make_request(url, api_key, body) do
     # Start inets application if not already started
     :inets.start()
@@ -169,14 +177,14 @@ defmodule ExOutlines.Backend.HTTP do
 
     headers = [
       {~c"Content-Type", ~c"application/json"},
-      {~c"Authorization", ~c"Bearer #{api_key}"}
+      {~c"Authorization", String.to_charlist("Bearer #{api_key}")}
     ]
 
     request = {
       String.to_charlist(url),
       headers,
       ~c"application/json",
-      String.to_charlist(body)
+      body
     }
 
     http_opts = [
@@ -190,12 +198,12 @@ defmodule ExOutlines.Backend.HTTP do
       timeout: 60_000
     ]
 
-    case :httpc.request(:post, request, http_opts, []) do
+    case :httpc.request(:post, request, http_opts, body_format: :binary) do
       {:ok, {{_, 200, _}, _headers, response_body}} ->
-        {:ok, List.to_string(response_body)}
+        {:ok, response_body}
 
       {:ok, {{_, status_code, _}, _headers, response_body}} ->
-        {:error, {:http_error, status_code, List.to_string(response_body)}}
+        {:error, {:http_error, status_code, response_body}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}

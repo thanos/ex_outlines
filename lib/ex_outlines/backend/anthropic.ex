@@ -35,9 +35,11 @@ defmodule ExOutlines.Backend.Anthropic do
 
   @impl true
   def call_llm(messages, opts) do
+    http_client = Keyword.get(opts, :http_client)
+
     with {:ok, config} <- validate_config(opts),
          {:ok, body} <- build_request_body(messages, config),
-         {:ok, response} <- make_request(config.api_key, body) do
+         {:ok, response} <- do_request(config.api_key, body, http_client) do
       parse_response(response)
     end
   end
@@ -137,6 +139,12 @@ defmodule ExOutlines.Backend.Anthropic do
   defp format_content_part(part) do
     raise ArgumentError,
           "unsupported content part type: #{inspect(Map.get(part, :type, part))}"
+  end
+
+  defp do_request(api_key, body, nil), do: make_request(api_key, body)
+
+  defp do_request(_api_key, body, http_client) when is_function(http_client, 2) do
+    http_client.(@api_url, body)
   end
 
   defp make_request(api_key, body) do
