@@ -908,6 +908,280 @@ defmodule ExOutlines.Spec.SchemaTest do
     end
   end
 
+  describe "exclusive min/max constraints" do
+    test "exclusive_min rejects value equal to boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_min: 0}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"score" => 0})
+      assert hd(diag.errors).message =~ "greater than 0 (exclusive)"
+    end
+
+    test "exclusive_min accepts value above boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_min: 0}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"score" => 1})
+      assert result.score == 1
+    end
+
+    test "exclusive_max rejects value equal to boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_max: 100}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"score" => 100})
+      assert hd(diag.errors).message =~ "less than 100 (exclusive)"
+    end
+
+    test "exclusive_max accepts value below boundary" do
+      schema = Schema.new(%{score: %{type: :integer, exclusive_max: 100}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"score" => 99})
+      assert result.score == 99
+    end
+
+    test "exclusive_min works with number type" do
+      schema = Schema.new(%{temp: %{type: :number, exclusive_min: 0.0}})
+
+      assert {:error, _} = Spec.validate(schema, %{"temp" => 0.0})
+      assert {:ok, result} = Spec.validate(schema, %{"temp" => 0.001})
+      assert result.temp == 0.001
+    end
+
+    test "exclusive_max works with number type" do
+      schema = Schema.new(%{temp: %{type: :number, exclusive_max: 100.0}})
+
+      assert {:error, _} = Spec.validate(schema, %{"temp" => 100.0})
+      assert {:ok, result} = Spec.validate(schema, %{"temp" => 99.999})
+      assert result.temp == 99.999
+    end
+
+    test "JSON Schema includes exclusiveMinimum and exclusiveMaximum" do
+      schema =
+        Schema.new(%{
+          value: %{type: :integer, exclusive_min: 0, exclusive_max: 100}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      value_schema = json_schema.properties.value
+      assert value_schema[:exclusiveMinimum] == 0
+      assert value_schema[:exclusiveMaximum] == 100
+    end
+  end
+
+  describe "multiple_of constraint" do
+    test "validates integer is multiple of value" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => 10})
+      assert result.quantity == 10
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => 0})
+      assert result.quantity == 0
+    end
+
+    test "rejects integer that is not a multiple" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"quantity" => 7})
+      assert hd(diag.errors).message =~ "multiple of 5"
+    end
+
+    test "validates number is multiple of float value" do
+      schema = Schema.new(%{price: %{type: :number, multiple_of: 0.25}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"price" => 1.75})
+      assert result.price == 1.75
+    end
+
+    test "rejects number that is not a multiple of float" do
+      schema = Schema.new(%{price: %{type: :number, multiple_of: 0.25}})
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"price" => 1.3})
+      assert hd(diag.errors).message =~ "multiple of 0.25"
+    end
+
+    test "validates integer value with float multiple_of" do
+      schema = Schema.new(%{halves: %{type: :number, multiple_of: 0.5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"halves" => 3})
+      assert result.halves == 3
+
+      assert {:ok, result} = Spec.validate(schema, %{"halves" => 2.5})
+      assert result.halves == 2.5
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"halves" => 3.3})
+      assert hd(diag.errors).message =~ "multiple of 0.5"
+    end
+
+    test "JSON Schema includes multipleOf" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      json_schema = Spec.to_schema(schema)
+      assert json_schema.properties.quantity[:multipleOf] == 5
+    end
+
+    test "combined with min/max constraints" do
+      schema =
+        Schema.new(%{
+          value: %{type: :integer, min: 0, max: 100, multiple_of: 10}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"value" => 50})
+      assert {:error, _} = Spec.validate(schema, %{"value" => 55})
+      assert {:error, _} = Spec.validate(schema, %{"value" => -10})
+      assert {:error, _} = Spec.validate(schema, %{"value" => 110})
+    end
+
+    test "validates negative integer is multiple of value" do
+      schema = Schema.new(%{quantity: %{type: :integer, multiple_of: 5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => -15})
+      assert result.quantity == -15
+
+      assert {:ok, result} = Spec.validate(schema, %{"quantity" => -5})
+      assert result.quantity == -5
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"quantity" => -7})
+      assert hd(diag.errors).message =~ "multiple of 5"
+    end
+
+    test "validates negative number is multiple of float value" do
+      schema = Schema.new(%{price: %{type: :number, multiple_of: 0.5}})
+
+      assert {:ok, result} = Spec.validate(schema, %{"price" => -2.5})
+      assert result.price == -2.5
+
+      assert {:error, _} = Spec.validate(schema, %{"price" => -2.3})
+    end
+
+    test "handles float precision edge case with multiple_of 0.1" do
+      schema = Schema.new(%{val: %{type: :number, multiple_of: 0.1}})
+
+      # 0.3 is notoriously imprecise in IEEE 754
+      assert {:ok, _} = Spec.validate(schema, %{"val" => 0.3})
+      assert {:ok, _} = Spec.validate(schema, %{"val" => 0.7})
+      assert {:ok, _} = Spec.validate(schema, %{"val" => 1.0})
+    end
+  end
+
+  describe "advanced numeric constraints in array items" do
+    test "exclusive_min/exclusive_max validated on integer array items" do
+      schema =
+        Schema.new(%{
+          scores: %{type: {:array, %{type: :integer, exclusive_min: 0, exclusive_max: 100}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"scores" => [1, 50, 99]})
+      assert result.scores == [1, 50, 99]
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"scores" => [0, 50]})
+      assert Enum.any?(diag.errors, &(&1.message =~ "greater than 0 (exclusive)"))
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"scores" => [50, 100]})
+      assert Enum.any?(diag.errors, &(&1.message =~ "less than 100 (exclusive)"))
+    end
+
+    test "multiple_of validated on integer array items" do
+      schema =
+        Schema.new(%{
+          multiples: %{type: {:array, %{type: :integer, multiple_of: 5}}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"multiples" => [5, 10, 25]})
+      assert result.multiples == [5, 10, 25]
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"multiples" => [5, 7]})
+      assert Enum.any?(diag.errors, &(&1.message =~ "multiple of 5"))
+    end
+
+    test "exclusive_min/exclusive_max validated on number array items" do
+      schema =
+        Schema.new(%{
+          temps: %{type: {:array, %{type: :number, exclusive_min: 0.0, exclusive_max: 100.0}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"temps" => [0.1, 50.0, 99.9]})
+
+      assert {:error, _} = Spec.validate(schema, %{"temps" => [0.0]})
+      assert {:error, _} = Spec.validate(schema, %{"temps" => [100.0]})
+    end
+
+    test "multiple_of validated on number array items" do
+      schema =
+        Schema.new(%{
+          prices: %{type: {:array, %{type: :number, multiple_of: 0.25}}}
+        })
+
+      assert {:ok, _} = Spec.validate(schema, %{"prices" => [1.0, 2.25, 3.5]})
+      assert {:error, _} = Spec.validate(schema, %{"prices" => [1.3]})
+    end
+
+    test "JSON Schema includes exclusiveMinimum/multipleOf under array items" do
+      schema =
+        Schema.new(%{
+          values: %{
+            type: {:array, %{type: :integer, exclusive_min: 0, multiple_of: 10}}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      items_schema = json_schema.properties.values[:items]
+      assert items_schema[:exclusiveMinimum] == 0
+      assert items_schema[:multipleOf] == 10
+    end
+
+    test "raises on invalid multiple_of in array item spec" do
+      assert_raise ArgumentError, ~r/multiple_of must be a positive number/, fn ->
+        Schema.new(%{values: %{type: {:array, %{type: :integer, multiple_of: 0}}}})
+      end
+    end
+
+    test "raises on non-numeric exclusive_min in array item spec" do
+      assert_raise ArgumentError, ~r/exclusive_min must be a number/, fn ->
+        Schema.new(%{values: %{type: {:array, %{type: :integer, exclusive_min: "bad"}}}})
+      end
+    end
+
+    test "normalizes nested union item specs" do
+      # Union branches inside array items should have their constraints validated
+      assert_raise ArgumentError, ~r/multiple_of must be a positive number/, fn ->
+        Schema.new(%{
+          values: %{
+            type: {:array, %{type: {:union, [%{type: :integer, multiple_of: 0}, %{type: :string}]}}}
+          }
+        })
+      end
+    end
+
+    test "normalizes nested tuple item specs" do
+      assert_raise ArgumentError, ~r/exclusive_min must be a number/, fn ->
+        Schema.new(%{
+          values: %{
+            type:
+              {:array,
+               %{type: {:tuple, [%{type: :integer, exclusive_min: "bad"}, %{type: :string}]}}}
+          }
+        })
+      end
+    end
+
+    test "JSON Schema for tuple inside array includes prefixItems" do
+      schema =
+        Schema.new(%{
+          points: %{
+            type: {:array, %{type: {:tuple, [%{type: :number}, %{type: :number}]}}}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+      items = json_schema.properties.points[:items]
+
+      assert items[:type] == "array"
+      assert items[:items] == false
+      assert items[:minItems] == 2
+      assert items[:maxItems] == 2
+      assert [%{type: "number"}, %{type: "number"}] = items[:prefixItems]
+    end
+  end
+
   describe "array validation" do
     test "validates array of strings" do
       schema =
@@ -1178,6 +1452,289 @@ defmodule ExOutlines.Spec.SchemaTest do
 
       assert {:ok, result} = Spec.validate(schema, %{})
       refute Map.has_key?(result, :tags)
+    end
+  end
+
+  describe "tuple type validation" do
+    test "validates tuple with correct length and types" do
+      schema =
+        Schema.new(%{
+          point: %{type: {:tuple, [%{type: :number}, %{type: :number}]}, required: true}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"point" => [1.5, 2.5]})
+      assert result.point == [1.5, 2.5]
+    end
+
+    test "rejects tuple with wrong length" do
+      schema =
+        Schema.new(%{
+          point: %{type: {:tuple, [%{type: :number}, %{type: :number}]}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"point" => [1.0]})
+      assert hd(diag.errors).message =~ "exactly 2 elements, got 1"
+
+      assert {:error, diag} = Spec.validate(schema, %{"point" => [1.0, 2.0, 3.0]})
+      assert hd(diag.errors).message =~ "exactly 2 elements, got 3"
+    end
+
+    test "validates different types at each position" do
+      schema =
+        Schema.new(%{
+          entry: %{type: {:tuple, [%{type: :string}, %{type: :integer}, %{type: :boolean}]}}
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"entry" => ["Alice", 30, true]})
+      assert result.entry == ["Alice", 30, true]
+    end
+
+    test "rejects wrong type at specific position" do
+      schema =
+        Schema.new(%{
+          entry: %{type: {:tuple, [%{type: :string}, %{type: :integer}]}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"entry" => ["Alice", "not_int"]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "integer"))
+    end
+
+    test "rejects non-array value" do
+      schema =
+        Schema.new(%{
+          point: %{type: {:tuple, [%{type: :number}, %{type: :number}]}}
+        })
+
+      assert {:error, %Diagnostics{} = diag} = Spec.validate(schema, %{"point" => "not array"})
+      assert hd(diag.errors).message =~ "must be an array (tuple)"
+    end
+
+    test "JSON Schema includes prefixItems and items: false" do
+      schema =
+        Schema.new(%{
+          coord: %{type: {:tuple, [%{type: :number}, %{type: :number}, %{type: :string}]}}
+        })
+
+      json_schema = Spec.to_schema(schema)
+      coord_schema = json_schema.properties.coord
+
+      assert coord_schema[:type] == "array"
+      assert coord_schema[:items] == false
+      assert coord_schema[:minItems] == 3
+      assert coord_schema[:maxItems] == 3
+
+      assert [
+               %{type: "number"},
+               %{type: "number"},
+               %{type: "string"}
+             ] = coord_schema[:prefixItems]
+    end
+
+    test "normalizes item specs in tuple type" do
+      # Ensures constraint validation works on tuple item specs
+      assert_raise ArgumentError, ~r/multiple_of must be a positive number/, fn ->
+        Schema.new(%{bad: %{type: {:tuple, [%{type: :integer, multiple_of: 0}]}}})
+      end
+    end
+
+    test "validates constraints on positional tuple elements" do
+      schema =
+        Schema.new(%{
+          data: %{
+            type:
+              {:tuple,
+               [
+                 %{type: :integer, min: 0, max: 100},
+                 %{type: :string, min_length: 1}
+               ]}
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"data" => [50, "hello"]})
+      assert result.data == [50, "hello"]
+
+      # First element out of range
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"data" => [150, "hello"]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "at most 100"))
+
+      # Second element too short
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"data" => [50, ""]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "at least 1"))
+    end
+
+    test "validates tuple elements inside arrays" do
+      schema =
+        Schema.new(%{
+          points: %{
+            type: {:array, %{type: {:tuple, [%{type: :number}, %{type: :number}]}}}
+          }
+        })
+
+      assert {:ok, result} = Spec.validate(schema, %{"points" => [[1.0, 2.0], [3.0, 4.0]]})
+      assert result.points == [[1.0, 2.0], [3.0, 4.0]]
+
+      # Wrong tuple length inside array
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"points" => [[1.0, 2.0], [3.0]]})
+
+      assert Enum.any?(diag.errors, &(&1.message =~ "exactly 2 elements"))
+    end
+  end
+
+  describe "conditional fields (depends_on)" do
+    test "conditionally required field is required when condition is met" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      # When type is "company", registration_number is required
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"type" => "company"})
+
+      assert Enum.any?(diag.errors, &(&1.field == "registration_number"))
+    end
+
+    test "conditionally required field is optional when condition is not met" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      # When type is "person", registration_number is not required
+      assert {:ok, result} = Spec.validate(schema, %{"type" => "person"})
+      assert result.type == "person"
+    end
+
+    test "conditionally required field passes when provided" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      assert {:ok, result} =
+               Spec.validate(schema, %{
+                 "type" => "company",
+                 "registration_number" => "ABC123"
+               })
+
+      assert result.type == "company"
+      assert result.registration_number == "ABC123"
+    end
+
+    test "static required + depends_on: static required always applies" do
+      schema =
+        Schema.new(%{
+          type: %{type: :string, required: true},
+          name: %{type: :string, required: true, depends_on: %{field: :type, equals: "x"}}
+        })
+
+      # name is statically required, so it's always required regardless of depends_on
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"type" => "other"})
+
+      assert Enum.any?(diag.errors, &(&1.field == "name"))
+    end
+
+    test "JSON Schema includes if/then blocks" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          reg_num: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      json_schema = Spec.to_schema(schema)
+
+      assert [conditional] = json_schema[:allOf]
+      assert conditional[:if][:properties][:type] == %{const: "company"}
+      assert conditional[:then][:required] == ["reg_num"]
+    end
+
+    test "no allOf when no conditional fields" do
+      schema = Schema.new(%{name: %{type: :string, required: true}})
+
+      json_schema = Spec.to_schema(schema)
+      refute Map.has_key?(json_schema, :allOf)
+    end
+
+    test "depends_on works correctly when dependency value is false" do
+      schema =
+        Schema.new(%{
+          active: %{type: :boolean, required: true},
+          reason: %{
+            type: :string,
+            depends_on: %{field: :active, equals: false}
+          }
+        })
+
+      # active is false -> reason is required
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"active" => false})
+
+      assert Enum.any?(diag.errors, &(&1.field == "reason"))
+
+      # active is true -> reason is not required
+      assert {:ok, result} = Spec.validate(schema, %{"active" => true})
+      assert result.active == true
+    end
+
+    test "depends_on when dependency field is entirely absent" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: false},
+          registration_number: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      # type is missing -> registration_number should not be conditionally required
+      assert {:ok, result} = Spec.validate(schema, %{})
+      refute Map.has_key?(result, :type)
+      refute Map.has_key?(result, :registration_number)
+    end
+
+    test "multiple depends_on fields on same dependency" do
+      schema =
+        Schema.new(%{
+          type: %{type: {:enum, ["person", "company"]}, required: true},
+          tax_id: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          },
+          business_license: %{
+            type: :string,
+            depends_on: %{field: :type, equals: "company"}
+          }
+        })
+
+      assert {:error, %Diagnostics{} = diag} =
+               Spec.validate(schema, %{"type" => "company"})
+
+      error_fields = Enum.map(diag.errors, & &1.field)
+      assert "tax_id" in error_fields
+      assert "business_license" in error_fields
     end
   end
 

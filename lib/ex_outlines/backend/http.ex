@@ -46,9 +46,11 @@ defmodule ExOutlines.Backend.HTTP do
 
   @impl ExOutlines.Backend
   def call_llm(messages, opts) do
+    http_client = Keyword.get(opts, :http_client)
+
     with {:ok, config} <- validate_config(opts),
          {:ok, body} <- build_request_body(messages, config),
-         {:ok, response} <- make_request(config.url, config.api_key, body) do
+         {:ok, response} <- do_request(config.url, config.api_key, body, http_client) do
       parse_response(response)
     end
   end
@@ -121,7 +123,7 @@ defmodule ExOutlines.Backend.HTTP do
   defp build_request_body(messages, config) do
     body = %{
       model: config.model,
-      messages: messages,
+      messages: Enum.map(messages, &format_message/1),
       temperature: config.temperature,
       max_tokens: config.max_tokens
     }
@@ -132,6 +134,42 @@ defmodule ExOutlines.Backend.HTTP do
     end
   end
 
+  defp format_message(%{role: role, content: content}) when is_binary(content) do
+    %{role: role, content: content}
+  end
+
+  defp format_message(%{role: role, content: parts}) when is_list(parts) do
+    %{role: role, content: Enum.map(parts, &format_content_part/1)}
+  end
+
+  defp format_message(msg) do
+    raise ArgumentError,
+          "unsupported message format: expected %{role: string, content: string | list}, got: #{inspect(msg)}"
+  end
+
+  defp format_content_part(%{type: :text, text: text}) do
+    %{type: "text", text: text}
+  end
+
+  defp format_content_part(%{type: :image_url, url: url}) do
+    %{type: "image_url", image_url: %{url: url}}
+  end
+
+  defp format_content_part(%{type: :image_base64, data: data, media_type: media_type}) do
+    %{type: "image_url", image_url: %{url: "data:#{media_type};base64,#{data}"}}
+  end
+
+  defp format_content_part(part) do
+    raise ArgumentError,
+          "unsupported content part type: #{inspect(Map.get(part, :type, part))}"
+  end
+
+  defp do_request(url, api_key, body, nil), do: make_request(url, api_key, body)
+
+  defp do_request(url, _api_key, body, http_client) when is_function(http_client, 2) do
+    http_client.(url, body)
+  end
+
   defp make_request(url, api_key, body) do
     # Start inets application if not already started
     :inets.start()
@@ -139,14 +177,14 @@ defmodule ExOutlines.Backend.HTTP do
 
     headers = [
       {~c"Content-Type", ~c"application/json"},
-      {~c"Authorization", ~c"Bearer #{api_key}"}
+      {~c"Authorization", String.to_charlist("Bearer #{api_key}")}
     ]
 
     request = {
       String.to_charlist(url),
       headers,
       ~c"application/json",
-      String.to_charlist(body)
+      body
     }
 
     http_opts = [
@@ -160,12 +198,12 @@ defmodule ExOutlines.Backend.HTTP do
       timeout: 60_000
     ]
 
-    case :httpc.request(:post, request, http_opts, []) do
+    case :httpc.request(:post, request, http_opts, body_format: :binary) do
       {:ok, {{_, 200, _}, _headers, response_body}} ->
-        {:ok, List.to_string(response_body)}
+        {:ok, response_body}
 
       {:ok, {{_, status_code, _}, _headers, response_body}} ->
-        {:error, {:http_error, status_code, List.to_string(response_body)}}
+        {:error, {:http_error, status_code, response_body}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}

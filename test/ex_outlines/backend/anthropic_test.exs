@@ -101,6 +101,47 @@ defmodule ExOutlines.Backend.AnthropicTest do
     end
   end
 
+  describe "multimodal content formatting" do
+    test "accepts multimodal content parts without crashing" do
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{type: :text, text: "Describe this image"},
+            %{type: :image_base64, data: "abc123", media_type: "image/png"},
+            %{type: :image_url, url: "https://example.com/img.jpg"}
+          ]
+        }
+      ]
+
+      opts = [api_key: "sk-ant-test"]
+      result = Anthropic.call_llm(messages, opts)
+
+      # Should fail at HTTP stage, not message formatting
+      assert match?({:error, {:http_request_failed, _}}, result) or
+               match?({:error, {:http_error, _, _}}, result)
+    end
+
+    test "handles mixed text and multimodal messages" do
+      messages = [
+        %{role: "system", content: "You are helpful."},
+        %{
+          role: "user",
+          content: [
+            %{type: :text, text: "What is this?"},
+            %{type: :image_base64, data: "data", media_type: "image/jpeg"}
+          ]
+        }
+      ]
+
+      opts = [api_key: "sk-ant-test"]
+      result = Anthropic.call_llm(messages, opts)
+
+      assert match?({:error, {:http_request_failed, _}}, result) or
+               match?({:error, {:http_error, _, _}}, result)
+    end
+  end
+
   describe "response parsing" do
     # Since we can't easily mock :httpc responses in tests, we document
     # the expected behavior here. In a production system, you would use
