@@ -295,31 +295,45 @@ Test actual LLM integration in a controlled way (use sparingly, these are slow a
 
 ### Integration Test Setup
 
-```elixir
-# test/support/integration_case.ex
-defmodule MyApp.IntegrationCase do
-  use ExUnit.CaseTemplate
+ExOutlines includes integration tests in `test/integration/` that test against real LLM APIs. These tests are excluded by default and only run when explicitly enabled.
 
-  using do
-    quote do
-      @moduletag :integration
+#### Running Integration Tests
 
-      def skip_if_no_api_key(context) do
-        if System.get_env("ANTHROPIC_API_KEY") do
-          context
-        else
-          {:ok, Map.put(context, :skip, true)}
-        end
-      end
-    end
-  end
-end
+```bash
+# Run all unit tests (default, excludes integration tests)
+mix test
 
-# In test_helper.exs
-ExUnit.configure(exclude: [integration: true])
+# Run integration tests only
+mix test --only integration
 
-# Run integration tests with:
-# mix test --only integration
+# Run with API keys
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... GEMINI_API_KEY=... mix test --only integration
+
+# Run specific integration test file
+mix test test/integration/openai_test.exs --only integration
+```
+
+#### Required Environment Variables
+
+| Backend | Environment Variable | Example |
+|---------|---------------------|---------|
+| OpenAI (HTTP) | `OPENAI_API_KEY` | `sk-proj-...` |
+| Anthropic | `ANTHROPIC_API_KEY` | `sk-ant-...` |
+| Gemini | `GEMINI_API_KEY` | `AIza...` |
+| Ollama | None (checks localhost:11434) | - |
+
+Tests automatically skip when the required API key is not set or Ollama is not running.
+
+#### Integration Test Directory Structure
+
+```
+test/integration/
+├── test_helper.exs       # Shared utilities for skipping, API key retrieval
+├── openai_test.exs       # HTTP backend against OpenAI API
+├── anthropic_test.exs    # Anthropic backend against Claude API
+├── gemini_test.exs       # Gemini backend against Google AI
+├── ollama_test.exs       # Ollama backend (local, no API key)
+└── multimodal_test.exs   # Vision/image tests across backends
 ```
 
 ### Integration Test Example

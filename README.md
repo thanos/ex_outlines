@@ -50,21 +50,23 @@ result.summary    # Guaranteed to be ≤100 characters
 
 ### Core Capabilities
 
-- **Rich Type System** - Strings, integers, booleans, numbers, enums, arrays, nested objects, union types
-- **Comprehensive Constraints** - Length limits, min/max values, regex patterns, unique items
+- **Rich Type System** - Strings, integers, booleans, numbers, enums, arrays, nested objects, union types, tuples, conditional fields
+- **Comprehensive Constraints** - Length limits, min/max, exclusive bounds, multipleOf, regex patterns, unique items
 - **Automatic Retry-Repair** - Failed validations trigger repair prompts with clear diagnostics
-- **Backend Agnostic** - Works with OpenAI, Anthropic, or any LLM API
+- **5 Backends** - OpenAI (HTTP), Anthropic, Google Gemini, Ollama (local), and Mock for testing
+- **Streaming** - Real-time generation via `generate_stream/2` with validated output
+- **Multimodal** - Vision model support with image inputs across all backends
+- **EEx Templates** - Reusable, parameterized prompt templates
 - **Batch Processing** - Concurrent generation using BEAM lightweight processes
 - **Ecto Integration** - Convert Ecto schemas automatically (optional)
 - **Telemetry Built-In** - Observable with Phoenix.LiveDashboard
-- **Testing First-Class** - Deterministic Mock backend for tests
 
 ### Elixir-Specific Advantages
 
 - **BEAM Concurrency** - Process 100s of requests concurrently
 - **Phoenix Integration** - Works seamlessly in controllers and LiveView
 - **Type Safety** - Dialyzer type specifications throughout
-- **Battle-Tested** - 364 tests, 93% coverage, production-grade
+- **Battle-Tested** - 521 tests, 85%+ coverage, production-grade
 
 ---
 
@@ -75,7 +77,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ex_outlines, "~> 0.1.0"}
+    {:ex_outlines, "~> 0.2.0"}
   ]
 end
 ```
@@ -85,7 +87,7 @@ Optional: Add Ecto for schema adapter:
 ```elixir
 def deps do
   [
-    {:ex_outlines, "~> 0.1.0"},
+    {:ex_outlines, "~> 0.2.0"},
     {:ecto, "~> 3.11"}  # Optional
   ]
 end
@@ -567,37 +569,33 @@ Both tools serve different ecosystems and constraints.
 
 ---
 
-## Next Steps
+## What's New in v0.2.0
 
-Active development priorities for v0.2.0:
-
-1. **Google Gemini Backend** (Complete) - Native Google Gemini API support for fast, cost-effective generation
-2. **EEx Template Integration** - Reusable prompt templates with variable interpolation using Elixir's built-in EEx
-3. **Streaming Support** - Real-time generation with incremental validation for responsive UIs and LiveView
-4. **Vision Model Support** - Multimodal image input for structured data extraction from invoices and documents
-5. **Ollama Native Backend** - Local model support for privacy-focused and cost-free generation
-6. **Bumblebee Integration** - Run Transformers models locally within the BEAM for offline generation
-7. **Advanced Numeric Constraints** - Add exclusive min/max and multipleOf constraints from JSON Schema
-8. **Tuple Type Support** - Fixed-length arrays with different types per position for precise validation
-9. **Conditional Fields** - Schema dependencies and conditional requirements for complex validation logic
-10. **Production Examples** - Expand example library with legal, medical, financial, and code analysis use cases
+1. **Google Gemini Backend** - Native Google Gemini API support with multimodal content
+2. **EEx Template Integration** - Reusable prompt templates with variable interpolation
+3. **Streaming Support** - Real-time generation with `generate_stream/2` and validated streams
+4. **Vision Model Support** - Multimodal image input via `ExOutlines.Content` for all backends
+5. **Ollama Native Backend** - Local model support with JSON mode and image support
+6. **Advanced Numeric Constraints** - `exclusive_min`, `exclusive_max`, and `multiple_of`
+7. **Tuple Type Support** - Fixed-length arrays with positional type validation
+8. **Conditional Fields** - Schema dependencies via `depends_on` with `if/then` JSON Schema output
+9. **521 tests** - Up from 364 in v0.1.0, with 85%+ coverage maintained
 
 ## Roadmap
 
 ### v0.3 (Planned)
 
-- [ ] Template system (EEx-based prompt templates)
-- [ ] Streaming support (incremental validation)
+- [ ] Bumblebee integration (local Transformers in BEAM)
 - [ ] Generator abstraction (reusable model + schema)
-- [ ] Additional backends (Ollama, vLLM)
-- [x] 14 comprehensive Livebook tutorials (completed in v0.1)
+- [ ] vLLM backend
+- [ ] Production examples (legal, medical, financial)
+- [ ] Function calling DSL
 
 ### v0.4+ (Future)
 
 - [ ] Context-free grammar support
-- [ ] Local model integration (Bumblebee)
-- [ ] Function calling DSL
 - [ ] Advanced caching layer
+- [ ] Multi-step generation workflows
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
@@ -624,6 +622,54 @@ mix format --check-formatted
 mix credo --strict
 mix dialyzer
 ```
+
+### Integration Tests
+
+ExOutlines includes integration tests that verify real LLM API interactions. These tests are excluded by default.
+
+#### Running Integration Tests
+
+```bash
+# Run integration tests only (requires API keys)
+mix test --only integration
+
+# Run with specific API keys
+OPENAI_API_KEY=sk-... mix test --only integration
+
+# Run with all backends
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... GEMINI_API_KEY=AIza... mix test --only integration
+```
+
+#### Required Environment Variables
+
+| Backend | Variable | Notes |
+|---------|----------|-------|
+| OpenAI | `OPENAI_API_KEY` | Uses `gpt-4o-mini` model |
+| Anthropic | `ANTHROPIC_API_KEY` | Uses `claude-sonnet-4-5-20250929` |
+| Gemini | `GEMINI_API_KEY` | Uses `gemini-2.0-flash` |
+| Ollama | None | Checks `http://localhost:11434` |
+
+Tests skip automatically when their API key is not set or Ollama is not running.
+
+#### Ollama Setup
+
+For local Ollama integration tests:
+
+```bash
+# Install and start Ollama
+ollama serve
+
+# Pull a model (tested with llama3)
+ollama pull llama3
+
+# Run Ollama integration tests
+mix test test/integration/ollama_test.exs --only integration
+
+# Or use a different model
+OLLAMA_MODEL=mistral mix test test/integration/ollama_test.exs --only integration
+```
+
+See [Testing Strategies Guide](guides/testing_strategies.md) for details.
 
 ---
 

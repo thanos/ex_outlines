@@ -43,8 +43,13 @@ defmodule ExOutlines.TemplateTest do
     test "handles missing assigns gracefully" do
       # EEx behavior for missing assigns varies by version (warn vs raise).
       # Template.render/2 should either return a string or raise ArgumentError.
+      # Capture warnings to avoid noise in test output
       try do
-        result = Template.render("Hello, <%= @missing %>!", [])
+        result =
+          ExUnit.CaptureIO.capture_io(:stderr, fn ->
+            Template.render("Hello, <%= @missing %>!", [])
+          end)
+
         assert is_binary(result)
       rescue
         e in ArgumentError ->
@@ -162,12 +167,16 @@ defmodule ExOutlines.TemplateTest do
     test "returns template_error for invalid EEx syntax" do
       schema = Schema.new(%{name: %{type: :string, required: true}})
 
-      result =
-        ExOutlines.generate(schema,
-          backend: Mock,
-          backend_opts: [mock: Mock.new([{:ok, ~s({"name": "x"})}])],
-          template: {"<%= if true %>", []}
-        )
+      # The invalid template will cause an error during compilation
+      # We capture stderr to suppress the noise
+      {result, _stderr} =
+        ExUnit.CaptureIO.with_io(:stderr, fn ->
+          ExOutlines.generate(schema,
+            backend: Mock,
+            backend_opts: [mock: Mock.new([{:ok, ~s({"name": "x"})}])],
+            template: {"<%= if true %>", []}
+          )
+        end)
 
       assert {:error, {:template_error, _}} = result
     end
