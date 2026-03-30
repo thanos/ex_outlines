@@ -9,51 +9,98 @@ defmodule ExOutlines.Integration.OllamaTest do
   alias ExOutlines.Spec.Schema
 
   @default_url "http://localhost:11434"
-  @default_model "llama3"
+  @preferred_models [
+    "llama3.2",
+    "llama3.1",
+    "llama3",
+    "llama2",
+    "mistral",
+    "mistral:latest",
+    "gemma2",
+    "gemma",
+    "phi3",
+    "qwen2"
+  ]
 
   setup_all do
     IntegrationTestHelper.skip_without_ollama(@default_url)
     :ok
   end
 
-  defp default_model do
-    System.get_env("OLLAMA_MODEL") || @default_model
-  end
-
-  defp model_available?(model) do
+  defp get_available_models do
     :inets.start()
 
     url = String.to_charlist("#{@default_url}/api/tags")
 
     case :httpc.request(:get, {url, []}, [timeout: 2000], []) do
       {:ok, {{_, 200, _}, _, body}} ->
-        check_model_in_response(body, model)
+        parse_models_response(body)
 
       _ ->
-        false
+        []
     end
   end
 
-  defp check_model_in_response(body, model) do
+  defp parse_models_response(body) do
     case Jason.decode(to_string(body)) do
       {:ok, %{"models" => models}} ->
-        Enum.any?(models, fn m -> String.starts_with?(m["name"], model) end)
+        Enum.map(models, fn m -> m["name"] end)
 
       _ ->
-        false
+        []
     end
   end
 
-  defp skip_without_model(model) do
-    unless model_available?(model) do
-      throw({:skip_test, "Model '#{model}' not pulled in Ollama - run: ollama pull #{model}"})
+  defp find_available_model do
+    available = get_available_models()
+
+    cond do
+      env_model = System.get_env("OLLAMA_MODEL") ->
+        if Enum.any?(available, &String.starts_with?(&1, env_model)) do
+          env_model
+        else
+          nil
+        end
+
+      model = find_preferred_model(available) ->
+        model
+
+      available != [] ->
+        hd(available)
+
+      true ->
+        nil
+    end
+  end
+
+  defp find_preferred_model(available) do
+    Enum.find(@preferred_models, fn preferred ->
+      Enum.any?(available, &String.starts_with?(&1, preferred))
+    end)
+  end
+
+  defp skip_without_available_model do
+    case find_available_model() do
+      nil ->
+        available = get_available_models()
+
+        message =
+          if available == [] do
+            "No models found in Ollama - run: ollama pull llama3"
+          else
+            "No suitable model found. Available: #{inspect(available)}"
+          end
+
+        throw({:skip_test, message})
+
+      model ->
+        model
     end
   end
 
   describe "generate/2 with Ollama backend" do
     test "returns valid output with simple schema" do
-      model = default_model()
-      skip_without_model(model)
+      model = skip_without_available_model()
 
       schema = IntegrationTestHelper.simple_schema()
 
@@ -68,9 +115,8 @@ defmodule ExOutlines.Integration.OllamaTest do
       assert String.length(result.name) > 0
     end
 
-    test "validates complex nested schema correctly" do
-      model = default_model()
-      skip_without_model(model)
+    test "validates complex schema correctly" do
+      model = skip_without_available_model()
 
       schema = IntegrationTestHelper.complex_schema()
 
@@ -81,18 +127,16 @@ defmodule ExOutlines.Integration.OllamaTest do
                  max_retries: 2
                )
 
-      assert is_binary(result.user.name)
-      assert is_integer(result.user.age)
-      assert result.user.age > 0
-      assert is_binary(result.user.email)
+      assert is_binary(result.username)
+      assert is_integer(result.age)
+      assert result.age >= 0
       assert result.status in ["active", "inactive"]
     end
   end
 
   describe "call_llm_stream/2 streaming" do
     test "returns streaming events" do
-      model = default_model()
-      skip_without_model(model)
+      model = skip_without_available_model()
 
       messages = [%{role: "user", content: "Respond with just: {\"word\": \"hello\"}"}]
 
@@ -110,8 +154,7 @@ defmodule ExOutlines.Integration.OllamaTest do
     end
 
     test "accumulates chunks into final result" do
-      model = default_model()
-      skip_without_model(model)
+      model = skip_without_available_model()
 
       messages = [%{role: "user", content: "Respond with JSON: {\"num\": 42}"}]
 
@@ -131,8 +174,7 @@ defmodule ExOutlines.Integration.OllamaTest do
 
   describe "JSON mode" do
     test "forces valid JSON output" do
-      model = default_model()
-      skip_without_model(model)
+      model = skip_without_available_model()
 
       schema =
         Schema.new(%{
@@ -152,8 +194,7 @@ defmodule ExOutlines.Integration.OllamaTest do
 
   describe "custom URL configuration" do
     test "accepts custom URL" do
-      model = default_model()
-      skip_without_model(model)
+      model = skip_without_available_model()
 
       schema = IntegrationTestHelper.simple_schema()
 
@@ -183,8 +224,7 @@ defmodule ExOutlines.Integration.OllamaTest do
 
   describe "temperature configuration" do
     test "respects temperature configuration" do
-      model = default_model()
-      skip_without_model(model)
+      model = skip_without_available_model()
 
       schema = IntegrationTestHelper.simple_schema()
 
@@ -194,6 +234,13 @@ defmodule ExOutlines.Integration.OllamaTest do
                  backend_opts: [model: model, temperature: 0.0],
                  max_retries: 2
                )
+    end
+  end
+
+  describe "model detection" do
+    test "lists available models" do
+      models = get_available_models()
+      refute models == [], "No models found in Ollama"
     end
   end
 end

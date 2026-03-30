@@ -10,7 +10,7 @@ defmodule ExOutlines.Integration.MultimodalTest do
 
   @test_image_url "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Raspberry-pi-4-model-b.jpg/320px-Raspberry-pi-4-model-b.jpg"
 
-  @small_base64_image "iVBORwD/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP///yH5BAEAAH8ALAAAAAAQABAAAAfMgH+gOEGh4eIMCIzDjAdE4ijFZqYKpBJCzR0dHR0dEoXDUkLDQ0NFQ0JdQoxHBsFagUBkYJEBQAQCAoKDUkOBGQFagUlVwQFagQCAgMCAgECAgECAQoEBYoJKAQoKAgYKBQoKCgoICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCv/bAIQABgQEBAUEBgQEBgkGBQYIBgYJDQsIBgYNDQ0NDg4SFBQUEBMcFxgWGRgYGBcgHBwcHBYgICUhHx8dCiQdHyEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEh/8AAEQgAAQABAwEiAAIRAQMRAf/aAAgBAQABPxA+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp8+nz6fPp//9k="
+  @small_base64_image "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
 
   describe "OpenAI multimodal" do
     @tag :openai_multimodal

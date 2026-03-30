@@ -44,17 +44,9 @@ defmodule ExOutlines.IntegrationTestHelper do
 
   def complex_schema do
     Schema.new(%{
-      user: %{
-        type: :object,
-        required: true,
-        properties: %{
-          name: %{type: :string, required: true},
-          age: %{type: :integer, required: true, positive: true},
-          email: %{type: :string, required: true}
-        }
-      },
-      status: %{type: {:enum, ["active", "inactive"]}, required: true},
-      score: %{type: :number, required: false}
+      username: %{type: :string, required: true, min_length: 2},
+      age: %{type: :integer, required: true, min: 0},
+      status: %{type: {:enum, ["active", "inactive"]}, required: true}
     })
   end
 

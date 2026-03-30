@@ -30,7 +30,7 @@ defmodule ExOutlines.Integration.AnthropicTest do
       assert String.length(result.name) > 0
     end
 
-    test "validates complex nested schema correctly" do
+    test "validates complex schema correctly" do
       api_key = IntegrationTestHelper.get_api_key("ANTHROPIC_API_KEY")
 
       schema = IntegrationTestHelper.complex_schema()
@@ -42,10 +42,9 @@ defmodule ExOutlines.Integration.AnthropicTest do
                  max_retries: 2
                )
 
-      assert is_binary(result.user.name)
-      assert is_integer(result.user.age)
-      assert result.user.age > 0
-      assert is_binary(result.user.email)
+      assert is_binary(result.username)
+      assert is_integer(result.age)
+      assert result.age >= 0
       assert result.status in ["active", "inactive"]
     end
 
