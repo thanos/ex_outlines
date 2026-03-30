@@ -5,20 +5,62 @@ defmodule ExOutlines.Prompt do
   Builds structured prompts from specs and diagnostics.
   """
 
-  @type message :: %{role: String.t(), content: String.t()}
+  @type message :: ExOutlines.Backend.message()
 
   @doc """
   Build initial generation prompt from a spec.
 
   Converts the spec to a schema representation and constructs
   a prompt instructing the LLM to generate conforming JSON output.
-  """
-  @spec build_initial(ExOutlines.Spec.t()) :: [message()]
-  def build_initial(spec) do
-    schema = ExOutlines.Spec.to_schema(spec)
-    schema_json = Jason.encode!(schema, pretty: true)
 
-    system_content = """
+  An optional `preamble` string can be prepended to the user message
+  (used by `ExOutlines.Template` for custom prompt content).
+  """
+  @spec build_initial(ExOutlines.Spec.t(), String.t() | nil) :: [message()]
+  def build_initial(spec, preamble \\ nil)
+
+  def build_initial(spec, nil), do: do_build_initial(spec, nil)
+
+  def build_initial(spec, preamble) when is_binary(preamble),
+    do: do_build_initial(spec, preamble)
+
+  defp do_build_initial(spec, preamble) do
+    schema_json =
+      spec
+      |> ExOutlines.Spec.to_schema()
+      |> Jason.encode!(pretty: true)
+
+    user_content =
+      case preamble do
+        nil ->
+          """
+          Generate JSON output conforming to this schema:
+
+          #{schema_json}
+
+          Respond with valid JSON only.
+          """
+
+        text when is_binary(text) ->
+          """
+          #{text}
+
+          Generate JSON output conforming to this schema:
+
+          #{schema_json}
+
+          Respond with valid JSON only.
+          """
+      end
+
+    [
+      %{role: "system", content: String.trim(system_content())},
+      %{role: "user", content: String.trim(user_content)}
+    ]
+  end
+
+  defp system_content do
+    """
     You are a structured data generator. You must produce valid JSON that conforms to the provided schema.
 
     Requirements:
@@ -27,8 +69,23 @@ defmodule ExOutlines.Prompt do
     - Include all required fields
     - Use correct types for all fields
     """
+  end
 
-    user_content = """
+  @doc """
+  Build initial generation prompt with multimodal content parts.
+
+  The content parts (images, text) are included alongside the schema
+  instructions in the user message. The system message remains text-only.
+  """
+  @spec build_initial_with_content(ExOutlines.Spec.t(), [ExOutlines.Backend.content_part()]) ::
+          [message()]
+  def build_initial_with_content(spec, content_parts) when is_list(content_parts) do
+    schema_json =
+      spec
+      |> ExOutlines.Spec.to_schema()
+      |> Jason.encode!(pretty: true)
+
+    schema_text = """
     Generate JSON output conforming to this schema:
 
     #{schema_json}
@@ -36,9 +93,11 @@ defmodule ExOutlines.Prompt do
     Respond with valid JSON only.
     """
 
+    user_content = content_parts ++ [%{type: :text, text: String.trim(schema_text)}]
+
     [
-      %{role: "system", content: String.trim(system_content)},
-      %{role: "user", content: String.trim(user_content)}
+      %{role: "system", content: String.trim(system_content())},
+      %{role: "user", content: user_content}
     ]
   end
 

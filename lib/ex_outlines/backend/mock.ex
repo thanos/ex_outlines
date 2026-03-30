@@ -131,6 +131,49 @@ defmodule ExOutlines.Backend.Mock do
     end
   end
 
+  @doc """
+  Call the mock backend with streaming.
+
+  If `:stream_chunks` is provided in opts, returns a stream of those chunks.
+  Otherwise, falls back to returning the next response as a single `{:done, text}` event.
+
+  ## Stream Chunks Format
+
+  Provide a list of `ExOutlines.Backend.stream_event()` tuples:
+
+      ExOutlines.generate_stream(spec,
+        backend: ExOutlines.Backend.Mock,
+        backend_opts: [
+          mock: mock,
+          stream_chunks: [
+            {:chunk, ~s({"na)},
+            {:chunk, ~s(me": "Alice"})},
+            {:done, ~s({"name": "Alice"})}
+          ]
+        ]
+      )
+  """
+  @impl ExOutlines.Backend
+  def call_llm_stream(messages, opts) when is_list(messages) and is_list(opts) do
+    mock = Keyword.get(opts, :mock)
+    chunks = Keyword.get(opts, :stream_chunks)
+
+    cond do
+      is_nil(mock) ->
+        {:error, :no_mock_provided}
+
+      not is_nil(chunks) ->
+        {:ok, chunks}
+
+      true ->
+        # Fall back to wrapping the next response as a done event
+        case get_next_response(mock) do
+          {:ok, text} -> {:ok, [{:done, text}]}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
   # Private helpers
 
   defp get_next_response(%__MODULE__{agent_pid: agent_pid}) do
