@@ -135,6 +135,11 @@ defmodule ExOutlines.Backend.Gemini do
     %{fileData: %{fileUri: url}}
   end
 
+  defp format_content_part(part) do
+    raise ArgumentError,
+          "unsupported content part type: #{inspect(Map.get(part, :type, part))}"
+  end
+
   defp gemini_role("assistant"), do: "model"
   defp gemini_role(role), do: role
 

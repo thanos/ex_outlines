@@ -134,6 +134,11 @@ defmodule ExOutlines.Backend.Anthropic do
     %{type: "image", source: %{type: "url", url: url}}
   end
 
+  defp format_content_part(part) do
+    raise ArgumentError,
+          "unsupported content part type: #{inspect(Map.get(part, :type, part))}"
+  end
+
   defp make_request(api_key, body) do
     # Start inets and ssl
     :inets.start()

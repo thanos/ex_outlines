@@ -45,6 +45,9 @@ defmodule ExOutlines.Stream do
 
       {:error, reason}, :streaming ->
         {[{:error, {:stream_error, reason}}], :halted}
+
+      event, :streaming ->
+        {[{:error, {:unexpected_stream_event, event}}], :halted}
     end)
   end
 

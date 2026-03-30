@@ -157,6 +157,11 @@ defmodule ExOutlines.Backend.HTTP do
     %{type: "image_url", image_url: %{url: "data:#{media_type};base64,#{data}"}}
   end
 
+  defp format_content_part(part) do
+    raise ArgumentError,
+          "unsupported content part type: #{inspect(Map.get(part, :type, part))}"
+  end
+
   defp make_request(url, api_key, body) do
     # Start inets application if not already started
     :inets.start()
