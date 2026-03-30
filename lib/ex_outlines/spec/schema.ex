@@ -115,9 +115,12 @@ defmodule ExOutlines.Spec.Schema do
           | :integer
           | :boolean
           | :number
+          | :null
           | {:enum, [any()]}
           | {:array, item_spec()}
           | {:tuple, [item_spec()]}
+          | {:object, t()}
+          | {:union, [map()]}
 
   @type field_spec :: %{
           type: field_type(),
@@ -836,8 +839,10 @@ defmodule ExOutlines.Spec.Schema do
           static_required
 
         %{field: dep_field, equals: dep_value} ->
-          actual = fetch_dep_value(value, dep_field)
-          static_required or actual == dep_value
+          case fetch_dep_value(value, dep_field) do
+            {:ok, actual} -> static_required or actual == dep_value
+            :missing -> static_required
+          end
 
         _ ->
           static_required
@@ -846,8 +851,14 @@ defmodule ExOutlines.Spec.Schema do
 
     defp fetch_dep_value(value, dep_field) do
       case Map.fetch(value, dep_field) do
-        {:ok, v} -> v
-        :error -> Map.get(value, to_string(dep_field))
+        {:ok, _} = found ->
+          found
+
+        :error ->
+          case Map.fetch(value, to_string(dep_field)) do
+            {:ok, _} = found -> found
+            :error -> :missing
+          end
       end
     end
 
