@@ -116,7 +116,12 @@ defmodule ExOutlines.Backend.Ollama do
     {text_parts, image_parts, unsupported} = classify_parts(parts)
 
     if unsupported != [] do
-      types = Enum.map(unsupported, & &1.type)
+      types =
+        Enum.map(unsupported, fn
+          %{type: t} -> t
+          _ -> :unknown
+        end)
+
       {:error, {:unsupported_content_types, types}}
     else
       text = Enum.map_join(text_parts, "\n", fn %{text: t} -> t end)

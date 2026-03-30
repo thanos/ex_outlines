@@ -307,6 +307,10 @@ defmodule ExOutlines.Spec.Schema do
     {:tuple, Enum.map(type_specs, &normalize_item_spec/1)}
   end
 
+  defp normalize_type({:union, type_specs}) when is_list(type_specs) do
+    {:union, Enum.map(type_specs, &normalize_item_spec/1)}
+  end
+
   defp normalize_type(type), do: type
 
   defp normalize_item_spec(spec) when is_map(spec) do
