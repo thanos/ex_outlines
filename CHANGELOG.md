@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-30
+
+### Added
+
+#### Streaming
+- `ExOutlines.generate_stream/2` for real-time streaming generation
+- `ExOutlines.Stream` module with validated stream accumulation
+- Streams halt after terminal events (`:done` or `:error`)
+- Automatic fallback to buffered mode for non-streaming backends
+
+#### Multimodal / Vision
+- `ExOutlines.Content` module with `text/1`, `image_url/1`, `image_base64/2`, `image_file/1`
+- `:content` option in `generate/2` for multimodal inputs
+- All backends (HTTP, Anthropic, Gemini, Ollama) format multimodal content per their API spec
+- Template and content options are mutually exclusive with clear error
+
+#### New Backends
+- `ExOutlines.Backend.Gemini` - Native Google Gemini API with `systemInstruction`, vision support, and injectable HTTP client for testing
+- `ExOutlines.Backend.Ollama` - Local model inference with `format: "json"`, `num_predict` (max_tokens), image support via `images` field, and streaming
+
+#### EEx Templates
+- `ExOutlines.Template` module with `render/2`, `render_file/2`, `build_messages/3`
+- `:template` option in `generate/2` accepting `{template_string, assigns}` tuples
+- Template rendering errors are rescued and returned as `{:error, {:template_error, exception}}`
+- Security documentation warning that templates execute arbitrary code
+
+#### Schema Extensions
+- `exclusive_min` / `exclusive_max` constraints for integers and numbers
+- `multiple_of` constraint with epsilon-based float comparison
+- `{:tuple, [type_spec]}` type for fixed-length arrays with positional validation
+- `depends_on: %{field: atom, equals: value}` for conditional field requirements
+- Recursive normalization of item specs in arrays, tuples, and unions
+- `if/then` JSON Schema output for conditional fields
+- `prefixItems` / `items: false` JSON Schema output for tuples
+
+#### Testing and Quality
+- Injectable `:http_client` option on Gemini, Ollama, HTTP, and Anthropic backends for deterministic testing without network access
+- Mock backend `call_llm_stream/2` with configurable `:stream_chunks`
+- 521 tests (up from 364), 85%+ coverage maintained
+- All new modules ship with >90% coverage
+
+### Changed
+- `ExOutlines.Backend` behaviour now includes optional `call_llm_stream/2` callback
+- `ExOutlines.Backend.message()` type extended to support `content: String.t() | [content_part()]`
+- `ExOutlines.Backend.call_opts()` widened from restrictive 3-key type to `keyword()`
+- `ExOutlines.Prompt.message()` type now aliases `ExOutlines.Backend.message()`
+- `@type field_type` and `@type item_type` expanded to include `:null`, `{:tuple, ...}`, `{:object, ...}`, `{:union, ...}`
+- Generation loop internals refactored to use `ctx` map, reducing function arity
+- `Prompt.build_initial/2` accepts optional preamble parameter (used by templates)
+- HTTP backend now uses `body_format: :binary` consistently with other backends
+
+### Fixed
+- `mix verify` task: `IO.stream()` replaced with `IO.stream(:stdio, :line)`, ANSI atoms wrapped with `IO.ANSI.format/1`, executable resolved via `System.find_executable/1`
+
 ## [0.1.0] - 2026-01-29
 
 Initial release of ExOutlines - deterministic structured output from LLMs via retry-repair loops.
